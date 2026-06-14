@@ -1,10 +1,10 @@
-import { Button, Space, Typography, Tooltip, Upload } from 'antd';
+import { Button, Space, Typography, Tooltip, Upload, Avatar } from 'antd';
 import {
-  MenuFoldOutlined,
-  MenuUnfoldOutlined,
   FileOutlined,
   ToolOutlined,
   UploadOutlined,
+  LogoutOutlined,
+  UserOutlined,
 } from '@ant-design/icons';
 
 const { Text } = Typography;
@@ -14,10 +14,17 @@ interface TopToolbarProps {
   onToggleRight: () => void;
   status: string;
   onUpload?: (file: File) => void;
+  username?: string;
+  onLogout?: () => void;
 }
 
 export default function TopToolbar({
-  rightCollapsed, onToggleRight, status, onUpload,
+  rightCollapsed,
+  onToggleRight,
+  status,
+  onUpload,
+  username,
+  onLogout,
 }: TopToolbarProps) {
   return (
     <div
@@ -36,6 +43,15 @@ export default function TopToolbar({
         <Text strong style={{ color: '#fff', fontSize: 14 }}>CDEViewer — Standalone BIM Viewer</Text>
       </Space>
       <Space>
+        {username && (
+          <Space style={{ marginRight: 8, borderRight: '1px solid #303030', paddingRight: 12 }}>
+            <Avatar size="small" icon={<UserOutlined />} style={{ backgroundColor: '#722ed1' }} />
+            <Text style={{ color: '#fff', fontSize: 13 }}>{username}</Text>
+            <Tooltip title="Sign Out">
+              <Button type="text" danger icon={<LogoutOutlined />} onClick={onLogout} style={{ padding: '0 4px' }} />
+            </Tooltip>
+          </Space>
+        )}
         <Upload accept=".ifc" showUploadList={false} beforeUpload={(file) => { onUpload?.(file); return false; }}>
           <Tooltip title="Load IFC file">
             <Button type="text" icon={<UploadOutlined />} style={{ color: '#fff' }}>Load IFC</Button>

@@ -5,6 +5,7 @@ import ToolPanel from './ToolPanel.tsx';
 import Viewport from './Viewport.tsx';
 import RightPanel from './RightPanel.tsx';
 import BottomBar from './BottomBar.tsx';
+import LoginPage from './LoginPage.tsx';
 import {
   createBimEngine,
   loadIfcFile,
@@ -16,6 +17,9 @@ import {
 const { Sider, Content } = Layout;
 
 export default function BimLayout() {
+  const [username, setUsername] = useState<string | null>(() => {
+    return localStorage.getItem('cde_viewer_user');
+  });
   const [rightCollapsed, setRightCollapsed] = useState(false);
   const [status, setStatus] = useState('Initializing...');
   const [modelCount, setModelCount] = useState(0);
@@ -107,6 +111,24 @@ export default function BimLayout() {
     }
   }, []);
 
+  const handleLoginSuccess = (name: string) => {
+    localStorage.setItem('cde_viewer_user', name);
+    setUsername(name);
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem('cde_viewer_user');
+    setUsername(null);
+  };
+
+  if (!username) {
+    return (
+      <ConfigProvider theme={{ algorithm: theme.darkAlgorithm }}>
+        <LoginPage onLoginSuccess={handleLoginSuccess} />
+      </ConfigProvider>
+    );
+  }
+
   return (
     <ConfigProvider theme={{ algorithm: theme.darkAlgorithm }}>
       <Layout style={{ height: '100%', background: '#141414' }}>
@@ -115,6 +137,8 @@ export default function BimLayout() {
           onToggleRight={() => setRightCollapsed(!rightCollapsed)}
           status={status}
           onUpload={handleUpload}
+          username={username}
+          onLogout={handleLogout}
         />
 
         <Layout style={{ flex: 1 }}>
