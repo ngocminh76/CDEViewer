@@ -17,12 +17,15 @@ export default function LoginPage({ onLoginSuccess }: LoginPageProps) {
     setTimeout(() => {
       setLoading(false);
       const { username, password } = values;
-      // Accept admin/admin as the mock credentials
-      if (username === 'admin' && password === 'admin') {
+      // Accept the user's specific credentials or admin/admin fallback
+      if (
+        (username === 'minhbimtech@gmail.com' && password === 'minbeogao211222@') ||
+        (username === 'admin' && password === 'admin')
+      ) {
         message.success('Login successful!');
         onLoginSuccess(username);
       } else {
-        message.error('Invalid credentials! Hint: use admin / admin');
+        message.error('Invalid credentials!');
       }
     }, 800);
   };
@@ -98,7 +101,7 @@ export default function LoginPage({ onLoginSuccess }: LoginPageProps) {
           >
             <Input
               prefix={<UserOutlined style={{ color: 'rgba(255,255,255,0.45)' }} />}
-              placeholder="Username (admin)"
+              placeholder="Username or Email"
               style={{
                 background: 'rgba(255,255,255,0.05)',
                 borderColor: 'rgba(255,255,255,0.1)',
@@ -114,7 +117,7 @@ export default function LoginPage({ onLoginSuccess }: LoginPageProps) {
           >
             <Input.Password
               prefix={<LockOutlined style={{ color: 'rgba(255,255,255,0.45)' }} />}
-              placeholder="Password (admin)"
+              placeholder="Password"
               style={{
                 background: 'rgba(255,255,255,0.05)',
                 borderColor: 'rgba(255,255,255,0.1)',
@@ -144,12 +147,6 @@ export default function LoginPage({ onLoginSuccess }: LoginPageProps) {
             </Button>
           </Form.Item>
         </Form>
-
-        <div style={{ textAlign: 'center', marginTop: 20 }}>
-          <Text type="secondary" style={{ fontSize: 11, color: '#595959' }}>
-            Demo Account: <Text strong style={{ color: '#aaa' }}>admin</Text> / <Text strong style={{ color: '#aaa' }}>admin</Text>
-          </Text>
-        </div>
       </Card>
     </div>
   );
