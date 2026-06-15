@@ -27,6 +27,7 @@ export default function BimLayout() {
   const [toolMode, setToolModeState] = useState<ToolMode>('select');
   const [clipCount, setClipCount] = useState(0);
   const [mapboxEnabled, setMapboxEnabledState] = useState(false);
+  const [mapboxCenter, setMapboxCenter] = useState<[number, number]>([8.5523926, 47.4133122]);
 
   const engineRef = useRef<BimEngine | null>(null);
   const cleanupRef = useRef<(() => void) | null>(null);
@@ -86,6 +87,13 @@ export default function BimLayout() {
     }
   }, [mapboxEnabled]);
 
+  const handleUpdateMapboxCenter = useCallback((center: [number, number]) => {
+    if (engineRef.current) {
+      engineRef.current.updateMapboxCenter(center);
+      setMapboxCenter(center);
+    }
+  }, []);
+
   useEffect(() => {
     return () => {
       cleanupRef.current?.();
@@ -133,6 +141,10 @@ export default function BimLayout() {
     try {
       await loadIfcFile(engine, file, setStatus);
       setModelCount(engine.fragments.list.size);
+      // Auto zoom to fit loaded model
+      setTimeout(async () => {
+        await engine.zoomToFit();
+      }, 100);
     } catch (err) {
       console.error('Upload failed:', err);
       setStatus('Upload failed');
@@ -195,7 +207,14 @@ export default function BimLayout() {
             trigger={null}
             style={{ background: '#1f1f1f', borderLeft: '1px solid #303030', overflow: 'auto' }}
           >
-            {!rightCollapsed && <RightPanel selection={selection} />}
+            {!rightCollapsed && (
+              <RightPanel
+                selection={selection}
+                mapboxEnabled={mapboxEnabled}
+                mapboxCenter={mapboxCenter}
+                onUpdateCenter={handleUpdateMapboxCenter}
+              />
+            )}
           </Sider>
         </Layout>
 

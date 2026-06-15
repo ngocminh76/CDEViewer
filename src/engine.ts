@@ -45,6 +45,7 @@ export interface BimEngine {
   // Mapbox
   initMapbox: (container: HTMLDivElement) => void;
   setMapboxEnabled: (enabled: boolean) => void;
+  updateMapboxCenter: (center: [number, number]) => void;
 
   // Selection
   setupSelection: (
@@ -158,11 +159,23 @@ export async function createBimEngine(
         mapBoxComponent.scene.add(group.object);
       }
       mapBoxComponent.onResize();
+      updateMapboxCenter(mapBoxComponent.coord.center);
     } else {
       // Move all loaded fragments/models back to local scene
       for (const group of fragments.list.values()) {
         world.scene.three.add(group.object);
       }
+    }
+  }
+
+  function updateMapboxCenter(center: [number, number]) {
+    mapBoxComponent.coord.center = center;
+    if (mapBoxComponent.map) {
+      mapBoxComponent.map.flyTo({
+        center: center,
+        zoom: 18,
+        essential: true
+      });
     }
   }
 
@@ -399,7 +412,7 @@ export async function createBimEngine(
     setClipperEnabled, createClip, deleteClip, deleteAllClips, getClipCount,
     zoomToFit, setCameraView,
     setToolMode, getToolMode,
-    initMapbox, setMapboxEnabled,
+    initMapbox, setMapboxEnabled, updateMapboxCenter,
   };
 }
 

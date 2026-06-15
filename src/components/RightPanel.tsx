@@ -1,14 +1,74 @@
-import { Descriptions, Collapse, Table, Tag, Empty, Typography } from 'antd';
+import { useState, useEffect } from 'react';
+import { Descriptions, Collapse, Table, Tag, Empty, Typography, Card, InputNumber, Button } from 'antd';
 import type { SelectionInfo } from '../engine.ts';
 
 const { Text } = Typography;
 
 interface RightPanelProps {
   selection: SelectionInfo | null;
+  mapboxEnabled: boolean;
+  mapboxCenter: [number, number];
+  onUpdateCenter: (center: [number, number]) => void;
 }
 
-export default function RightPanel({ selection }: RightPanelProps) {
+export default function RightPanel({
+  selection,
+  mapboxEnabled,
+  mapboxCenter,
+  onUpdateCenter,
+}: RightPanelProps) {
+  const [lng, setLng] = useState(mapboxCenter[0]);
+  const [lat, setLat] = useState(mapboxCenter[1]);
+
+  useEffect(() => {
+    setLng(mapboxCenter[0]);
+    setLat(mapboxCenter[1]);
+  }, [mapboxCenter]);
+
+  const renderGisCard = () => (
+    <Card
+      title="📍 Định vị GIS dự án"
+      size="small"
+      style={{ marginBottom: 12, background: '#1f1f2e', borderColor: '#303050' }}
+    >
+      <Descriptions column={1} size="small" style={{ marginBottom: 8 }}>
+        <Descriptions.Item label="Kinh độ (Lng)">
+          <InputNumber
+            value={lng}
+            onChange={(v) => v !== null && setLng(v)}
+            style={{ width: '100%' }}
+            step={0.000001}
+            precision={7}
+          />
+        </Descriptions.Item>
+        <Descriptions.Item label="Vĩ độ (Lat)">
+          <InputNumber
+            value={lat}
+            onChange={(v) => v !== null && setLat(v)}
+            style={{ width: '100%' }}
+            step={0.000001}
+            precision={7}
+          />
+        </Descriptions.Item>
+      </Descriptions>
+      <Button
+        type="primary"
+        onClick={() => onUpdateCenter([lng, lat])}
+        style={{ width: '100%' }}
+      >
+        Cập nhật & Bay tới
+      </Button>
+    </Card>
+  );
+
   if (!selection) {
+    if (mapboxEnabled) {
+      return (
+        <div style={{ padding: 12, overflow: 'auto', height: '100%' }}>
+          {renderGisCard()}
+        </div>
+      );
+    }
     return <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="Click element to see properties" style={{ padding: '40px 16px' }} />;
   }
 
@@ -16,6 +76,8 @@ export default function RightPanel({ selection }: RightPanelProps) {
 
   return (
     <div style={{ padding: 12, overflow: 'auto', height: '100%' }}>
+      {mapboxEnabled && renderGisCard()}
+
       <div style={{ marginBottom: 12 }}>
         <Tag color="blue">{modelId}</Tag>
         <Tag color="orange">#{localId}</Tag>
