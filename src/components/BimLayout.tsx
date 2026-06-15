@@ -80,25 +80,25 @@ export default function BimLayout() {
       engine.clipper.list.onItemSet.add(() => refreshClipCount());
       engine.clipper.list.onItemDeleted.add(() => refreshClipCount());
 
-      engine.fragments.list.onItemSet.add(() => {
+      engine.fragments.list.onItemSet.add(async (event) => {
         const size = engine.fragments.list.size;
         setModelCount(size);
-        if (size === 1) {
-          const matrix = engine.fragments.baseCoordinationMatrix;
-          const pos = new THREE.Vector3();
-          pos.setFromMatrixPosition(matrix);
-          // Check if coordinate offset is a large UTM/VN-2000 coordinate
-          if (Math.abs(pos.x) > 10000 && Math.abs(pos.y) > 10000) {
-            console.log('Georeference base point detected:', pos);
-            setRawX(pos.x);
-            setRawY(pos.y);
-            setRawZ(pos.z);
-            // Convert to WGS84
-            const [lng, lat] = vn2000ToWgs84(pos.x, pos.y, kttRef.current, zone3degRef.current);
-            setMapboxCenter([lng, lat]);
-            setMapboxElevation(pos.z);
-            engine.updateMapboxGISParameters([lng, lat], pos.z, mapboxHeadingRef.current);
-          }
+        const model = event.value;
+        const matrix = await model.getCoordinationMatrix();
+        const pos = new THREE.Vector3();
+        pos.setFromMatrixPosition(matrix);
+        console.log(`[CDEViewer] Model loaded. Base point coordinates:`, pos);
+        // Check if coordinate offset is a large UTM/VN-2000 coordinate
+        if (Math.abs(pos.x) > 10000 && Math.abs(pos.y) > 10000) {
+          console.log('[CDEViewer] Georeference base point detected from model:', pos);
+          setRawX(pos.x);
+          setRawY(pos.y);
+          setRawZ(pos.z);
+          // Convert to WGS84
+          const [lng, lat] = vn2000ToWgs84(pos.x, pos.y, kttRef.current, zone3degRef.current);
+          setMapboxCenter([lng, lat]);
+          setMapboxElevation(pos.z);
+          engine.updateMapboxGISParameters([lng, lat], pos.z, mapboxHeadingRef.current);
         }
       });
 
@@ -149,6 +149,9 @@ export default function BimLayout() {
     heading?: number;
     ktt?: number;
     zone3deg?: boolean;
+    rawX?: number | null;
+    rawY?: number | null;
+    rawZ?: number | null;
   }) => {
     const engine = engineRef.current;
     if (!engine) return;
@@ -158,6 +161,22 @@ export default function BimLayout() {
     let nextHeading = mapboxHeading;
     let nextKtt = ktt;
     let nextZone = zone3deg;
+    let nextRawX = rawX;
+    let nextRawY = rawY;
+    let nextRawZ = rawZ;
+
+    if (params.rawX !== undefined) {
+      nextRawX = params.rawX;
+      setRawX(nextRawX);
+    }
+    if (params.rawY !== undefined) {
+      nextRawY = params.rawY;
+      setRawY(nextRawY);
+    }
+    if (params.rawZ !== undefined) {
+      nextRawZ = params.rawZ;
+      setRawZ(nextRawZ);
+    }
 
     if (params.ktt !== undefined) {
       nextKtt = params.ktt;
@@ -176,18 +195,22 @@ export default function BimLayout() {
       setMapboxHeading(nextHeading);
     }
 
-    if (rawX !== null && rawY !== null && (params.ktt !== undefined || params.zone3deg !== undefined)) {
-      // Recalculate center based on KTT/Zone changes
-      const [lng, lat] = vn2000ToWgs84(rawX, rawY, nextKtt, nextZone);
+    if (nextRawX !== null && nextRawY !== null) {
+      // Recalculate center based on VN-2000 coordinates and KTT/Zone
+      const [lng, lat] = vn2000ToWgs84(nextRawX, nextRawY, nextKtt, nextZone);
       nextCenter = [lng, lat];
       setMapboxCenter(nextCenter);
+      if (nextRawZ !== null && params.elevation === undefined) {
+        nextElevation = nextRawZ;
+        setMapboxElevation(nextElevation);
+      }
     } else if (params.center !== undefined) {
       nextCenter = params.center;
       setMapboxCenter(nextCenter);
     }
 
     engine.updateMapboxGISParameters(nextCenter, nextElevation, nextHeading);
-  }, [mapboxCenter, mapboxElevation, mapboxHeading, ktt, zone3deg, rawX, rawY]);
+  }, [mapboxCenter, mapboxElevation, mapboxHeading, ktt, zone3deg, rawX, rawY, rawZ]);
 
   useEffect(() => {
     return () => {

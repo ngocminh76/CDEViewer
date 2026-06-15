@@ -22,6 +22,9 @@ interface RightPanelProps {
     heading?: number;
     ktt?: number;
     zone3deg?: boolean;
+    rawX?: number | null;
+    rawY?: number | null;
+    rawZ?: number | null;
   }) => void;
 }
 
@@ -48,6 +51,11 @@ export default function RightPanel({
   const [localZone3deg, setLocalZone3deg] = useState(zone3deg);
   const [showCustomKtt, setShowCustomKtt] = useState(false);
   const [customKttVal, setCustomKttVal] = useState(ktt);
+
+  // Local VN-2000 raw coordinates states
+  const [localRawX, setLocalRawX] = useState<number | null>(rawX);
+  const [localRawY, setLocalRawY] = useState<number | null>(rawY);
+  const [localRawZ, setLocalRawZ] = useState<number | null>(rawZ);
 
   useEffect(() => {
     setLng(mapboxCenter[0]);
@@ -77,15 +85,30 @@ export default function RightPanel({
     setLocalZone3deg(zone3deg);
   }, [zone3deg]);
 
-  // Recalculate WGS84 center when KTT or Zone changes locally
   useEffect(() => {
-    if (rawX !== null && rawY !== null) {
+    setLocalRawX(rawX);
+  }, [rawX]);
+
+  useEffect(() => {
+    setLocalRawY(rawY);
+  }, [rawY]);
+
+  useEffect(() => {
+    setLocalRawZ(rawZ);
+  }, [rawZ]);
+
+  // Recalculate WGS84 center when KTT, Zone, or raw coordinates change locally
+  useEffect(() => {
+    if (localRawX !== null && localRawY !== null) {
       const activeKtt = showCustomKtt ? customKttVal : localKtt;
-      const [newLng, newLat] = vn2000ToWgs84(rawX, rawY, activeKtt, localZone3deg);
+      const [newLng, newLat] = vn2000ToWgs84(localRawX, localRawY, activeKtt, localZone3deg);
       setLng(newLng);
       setLat(newLat);
+      if (localRawZ !== null) {
+        setElevation(localRawZ);
+      }
     }
-  }, [localKtt, localZone3deg, showCustomKtt, customKttVal, rawX, rawY]);
+  }, [localKtt, localZone3deg, showCustomKtt, customKttVal, localRawX, localRawY, localRawZ]);
 
   const handleApply = () => {
     const activeKtt = showCustomKtt ? customKttVal : localKtt;
@@ -95,6 +118,9 @@ export default function RightPanel({
       heading,
       ktt: activeKtt,
       zone3deg: localZone3deg,
+      rawX: localRawX,
+      rawY: localRawY,
+      rawZ: localRawZ,
     });
   };
 
@@ -113,36 +139,57 @@ export default function RightPanel({
       size="small"
       style={{ marginBottom: 12, background: '#1f1f2e', borderColor: '#303050' }}
     >
-      {rawX !== null ? (
-        <div style={{ marginBottom: 12 }}>
+      <div style={{ marginBottom: 12 }}>
+        {rawX !== null ? (
           <Alert
             message="Đã nhận tọa độ VN-2000 từ mô hình"
             type="success"
             showIcon
             style={{ fontSize: 11, padding: '4px 8px', marginBottom: 8 }}
           />
-          <Descriptions column={1} size="small" bordered style={{ marginBottom: 8 }}>
-            <Descriptions.Item label="VN2000 X">
-              <Text code style={{ fontSize: 11 }}>{rawX.toFixed(3)} m</Text>
-            </Descriptions.Item>
-            <Descriptions.Item label="VN2000 Y">
-              <Text code style={{ fontSize: 11 }}>{rawY!.toFixed(3)} m</Text>
-            </Descriptions.Item>
-            <Descriptions.Item label="VN2000 Z">
-              <Text code style={{ fontSize: 11 }}>{rawZ!.toFixed(3)} m</Text>
-            </Descriptions.Item>
-          </Descriptions>
-        </div>
-      ) : (
-        <div style={{ marginBottom: 12 }}>
+        ) : (
           <Alert
-            message="Chưa có dữ liệu tọa độ VN-2000 từ mô hình"
+            message="Không nhận được tọa độ từ mô hình. Bạn hãy nhập thủ công:"
             type="warning"
             showIcon
-            style={{ fontSize: 11, padding: '4px 8px' }}
+            style={{ fontSize: 11, padding: '4px 8px', marginBottom: 8 }}
           />
+        )}
+        
+        {/* Raw VN-2000 fields */}
+        <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
+          <div style={{ flex: 1 }}>
+            <span style={{ fontSize: 10, color: '#aaa', display: 'block', marginBottom: 2 }}>VN2000 X (m):</span>
+            <InputNumber
+              value={localRawX}
+              onChange={(v) => setLocalRawX(v)}
+              style={{ width: '100%' }}
+              placeholder="Ví dụ: 552120"
+              precision={3}
+            />
+          </div>
+          <div style={{ flex: 1 }}>
+            <span style={{ fontSize: 10, color: '#aaa', display: 'block', marginBottom: 2 }}>VN2000 Y (m):</span>
+            <InputNumber
+              value={localRawY}
+              onChange={(v) => setLocalRawY(v)}
+              style={{ width: '100%' }}
+              placeholder="Ví dụ: 1098450"
+              precision={3}
+            />
+          </div>
+          <div style={{ flex: 1 }}>
+            <span style={{ fontSize: 10, color: '#aaa', display: 'block', marginBottom: 2 }}>VN2000 Z (m):</span>
+            <InputNumber
+              value={localRawZ}
+              onChange={(v) => setLocalRawZ(v)}
+              style={{ width: '100%' }}
+              placeholder="Cao độ"
+              precision={3}
+            />
+          </div>
         </div>
-      )}
+      </div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
         <div>
