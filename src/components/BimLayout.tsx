@@ -1,5 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { Layout, ConfigProvider, theme } from 'antd';
+import * as THREE from 'three';
 import TopToolbar from './TopToolbar.tsx';
 import ToolPanel from './ToolPanel.tsx';
 import Viewport from './Viewport.tsx';
@@ -13,6 +14,7 @@ import {
   type SelectionInfo,
   type ToolMode,
 } from '../engine.ts';
+import { vn2000ToWgs84 } from '../utils/coordination.ts';
 
 const { Sider, Content } = Layout;
 
@@ -30,6 +32,30 @@ export default function BimLayout() {
   const [mapboxCenter, setMapboxCenter] = useState<[number, number]>([105.804817, 21.028511]);
   const [mapboxElevation, setMapboxElevation] = useState<number>(0);
   const [mapboxHeading, setMapboxHeading] = useState<number>(0);
+
+  // VN-2000 coordination states
+  const [rawX, setRawX] = useState<number | null>(null);
+  const [rawY, setRawY] = useState<number | null>(null);
+  const [rawZ, setRawZ] = useState<number | null>(null);
+  const [ktt, setKtt] = useState<number>(105.5); // Default to 105.5 (105°30')
+  const [zone3deg, setZone3deg] = useState<boolean>(true); // Default to 3-degree zone
+
+
+  const kttRef = useRef(ktt);
+  const zone3degRef = useRef(zone3deg);
+  const mapboxHeadingRef = useRef(mapboxHeading);
+
+  useEffect(() => {
+    kttRef.current = ktt;
+  }, [ktt]);
+
+  useEffect(() => {
+    zone3degRef.current = zone3deg;
+  }, [zone3deg]);
+
+  useEffect(() => {
+    mapboxHeadingRef.current = mapboxHeading;
+  }, [mapboxHeading]);
 
   const engineRef = useRef<BimEngine | null>(null);
   const cleanupRef = useRef<(() => void) | null>(null);
@@ -55,7 +81,35 @@ export default function BimLayout() {
       engine.clipper.list.onItemDeleted.add(() => refreshClipCount());
 
       engine.fragments.list.onItemSet.add(() => {
-        setModelCount(engine.fragments.list.size);
+        const size = engine.fragments.list.size;
+        setModelCount(size);
+        if (size === 1) {
+          const matrix = engine.fragments.baseCoordinationMatrix;
+          const pos = new THREE.Vector3();
+          pos.setFromMatrixPosition(matrix);
+          // Check if coordinate offset is a large UTM/VN-2000 coordinate
+          if (Math.abs(pos.x) > 10000 && Math.abs(pos.y) > 10000) {
+            console.log('Georeference base point detected:', pos);
+            setRawX(pos.x);
+            setRawY(pos.y);
+            setRawZ(pos.z);
+            // Convert to WGS84
+            const [lng, lat] = vn2000ToWgs84(pos.x, pos.y, kttRef.current, zone3degRef.current);
+            setMapboxCenter([lng, lat]);
+            setMapboxElevation(pos.z);
+            engine.updateMapboxGISParameters([lng, lat], pos.z, mapboxHeadingRef.current);
+          }
+        }
+      });
+
+      engine.fragments.list.onItemDeleted.add(() => {
+        const size = engine.fragments.list.size;
+        setModelCount(size);
+        if (size === 0) {
+          setRawX(null);
+          setRawY(null);
+          setRawZ(null);
+        }
       });
     } catch (err) {
       console.error('Engine init failed:', err);
@@ -89,14 +143,51 @@ export default function BimLayout() {
     }
   }, [mapboxEnabled]);
 
-  const handleUpdateMapboxGISParameters = useCallback((center: [number, number], elevation: number, heading: number) => {
-    if (engineRef.current) {
-      engineRef.current.updateMapboxGISParameters(center, elevation, heading);
-      setMapboxCenter(center);
-      setMapboxElevation(elevation);
-      setMapboxHeading(heading);
+  const handleUpdateParams = useCallback((params: {
+    center?: [number, number];
+    elevation?: number;
+    heading?: number;
+    ktt?: number;
+    zone3deg?: boolean;
+  }) => {
+    const engine = engineRef.current;
+    if (!engine) return;
+
+    let nextCenter = mapboxCenter;
+    let nextElevation = mapboxElevation;
+    let nextHeading = mapboxHeading;
+    let nextKtt = ktt;
+    let nextZone = zone3deg;
+
+    if (params.ktt !== undefined) {
+      nextKtt = params.ktt;
+      setKtt(nextKtt);
     }
-  }, []);
+    if (params.zone3deg !== undefined) {
+      nextZone = params.zone3deg;
+      setZone3deg(nextZone);
+    }
+    if (params.elevation !== undefined) {
+      nextElevation = params.elevation;
+      setMapboxElevation(nextElevation);
+    }
+    if (params.heading !== undefined) {
+      nextHeading = params.heading;
+      setMapboxHeading(nextHeading);
+    }
+
+    if (rawX !== null && rawY !== null && (params.ktt !== undefined || params.zone3deg !== undefined)) {
+      // Recalculate center based on KTT/Zone changes
+      const [lng, lat] = vn2000ToWgs84(rawX, rawY, nextKtt, nextZone);
+      nextCenter = [lng, lat];
+      setMapboxCenter(nextCenter);
+    } else if (params.center !== undefined) {
+      nextCenter = params.center;
+      setMapboxCenter(nextCenter);
+    }
+
+    engine.updateMapboxGISParameters(nextCenter, nextElevation, nextHeading);
+  }, [mapboxCenter, mapboxElevation, mapboxHeading, ktt, zone3deg, rawX, rawY]);
 
   useEffect(() => {
     return () => {
@@ -218,7 +309,12 @@ export default function BimLayout() {
                 mapboxCenter={mapboxCenter}
                 mapboxElevation={mapboxElevation}
                 mapboxHeading={mapboxHeading}
-                onUpdateCenter={handleUpdateMapboxGISParameters}
+                rawX={rawX}
+                rawY={rawY}
+                rawZ={rawZ}
+                ktt={ktt}
+                zone3deg={zone3deg}
+                onUpdateParams={handleUpdateParams}
               />
             )}
           </Sider>
