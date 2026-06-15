@@ -18,6 +18,30 @@ import { vn2000ToWgs84 } from '../utils/coordination.ts';
 
 const { Sider, Content } = Layout;
 
+function parseIfcCoordinate(val: any): number | null {
+  if (!val) return null;
+  const arr = Array.isArray(val) ? val : (val.value && Array.isArray(val.value) ? val.value : null);
+  if (!arr || arr.length === 0) return null;
+  
+  // IFC RefLatitude / RefLongitude format: [degrees, minutes, seconds, microseconds]
+  const deg = Number(arr[0]) || 0;
+  const min = Number(arr[1]) || 0;
+  const sec = Number(arr[2]) || 0;
+  const microsec = Number(arr[3]) || 0;
+  
+  const sign = deg < 0 ? -1 : 1;
+  const absDeg = Math.abs(deg);
+  const decimal = absDeg + min / 60 + (sec + microsec / 1000000) / 3600;
+  return sign * decimal;
+}
+
+function parseIfcElevation(val: any): number | null {
+  if (val === null || val === undefined) return null;
+  if (typeof val === 'object' && val.value !== undefined) return Number(val.value);
+  if (typeof val !== 'object') return Number(val);
+  return null;
+}
+
 export default function BimLayout() {
   const [username, setUsername] = useState<string | null>(() => {
     return localStorage.getItem('cde_viewer_user');
@@ -84,21 +108,109 @@ export default function BimLayout() {
         const size = engine.fragments.list.size;
         setModelCount(size);
         const model = event.value;
-        const matrix = await model.getCoordinationMatrix();
-        const pos = new THREE.Vector3();
-        pos.setFromMatrixPosition(matrix);
-        console.log(`[CDEViewer] Model loaded. Base point coordinates:`, pos);
-        // Check if coordinate offset is a large UTM/VN-2000 coordinate
-        if (Math.abs(pos.x) > 10000 && Math.abs(pos.y) > 10000) {
-          console.log('[CDEViewer] Georeference base point detected from model:', pos);
-          setRawX(pos.x);
-          setRawY(pos.y);
-          setRawZ(pos.z);
-          // Convert to WGS84
-          const [lng, lat] = vn2000ToWgs84(pos.x, pos.y, kttRef.current, zone3degRef.current);
-          setMapboxCenter([lng, lat]);
-          setMapboxElevation(pos.z);
-          engine.updateMapboxGISParameters([lng, lat], pos.z, mapboxHeadingRef.current);
+        
+        let foundGeoreference = false;
+        
+        // 1. Try to get from CRSData using getCRS()
+        try {
+          const crs = await model.getCRS();
+          console.log('[CDEViewer] Model CRS data:', crs);
+          if (crs && crs.mapConversion) {
+            const east = crs.mapConversion.eastings;
+            const north = crs.mapConversion.northings;
+            const height = crs.mapConversion.orthogonalHeight;
+            
+            if (Math.abs(east) > 10000 && Math.abs(north) > 10000) {
+              console.log('[CDEViewer] Georeference base point detected from getCRS():', east, north, height);
+              setRawX(east);
+              setRawY(north);
+              setRawZ(height);
+              // Convert to WGS84
+              const [lng, lat] = vn2000ToWgs84(east, north, kttRef.current, zone3degRef.current);
+              setMapboxCenter([lng, lat]);
+              setMapboxElevation(height);
+              engine.updateMapboxGISParameters([lng, lat], height, mapboxHeadingRef.current);
+              foundGeoreference = true;
+            }
+          }
+        } catch (crsErr) {
+          console.warn('[CDEViewer] Failed to query model.getCRS():', crsErr);
+        }
+        
+        // 2. Try to get from coordination matrix
+        if (!foundGeoreference) {
+          try {
+            const matrix = await model.getCoordinationMatrix();
+            const pos = new THREE.Vector3();
+            pos.setFromMatrixPosition(matrix);
+            console.log(`[CDEViewer] Model loaded. Base point coordinates:`, pos);
+            
+            // Check if coordination matrix has a large UTM/VN-2000 coordinate
+            if (Math.abs(pos.x) > 10000 && Math.abs(pos.y) > 10000) {
+              console.log('[CDEViewer] Georeference base point detected from coordination matrix:', pos);
+              setRawX(pos.x);
+              setRawY(pos.y);
+              setRawZ(pos.z);
+              // Convert to WGS84
+              const [lng, lat] = vn2000ToWgs84(pos.x, pos.y, kttRef.current, zone3degRef.current);
+              setMapboxCenter([lng, lat]);
+              setMapboxElevation(pos.z);
+              engine.updateMapboxGISParameters([lng, lat], pos.z, mapboxHeadingRef.current);
+              foundGeoreference = true;
+            }
+          } catch (matrixErr) {
+            console.warn('[CDEViewer] Failed to query model.getCoordinationMatrix():', matrixErr);
+          }
+        }
+        
+        // 3. If not found via coordination matrix, try to query from IfcSite (RefLatitude/RefLongitude)
+        if (!foundGeoreference) {
+          try {
+            const classifier = engine.classifier;
+            const categoryMap = classifier.list.get('Categories');
+            const siteClass = categoryMap?.get('IFCSITE');
+            if (siteClass) {
+              const map = await siteClass.get();
+              const expressIds = map[model.modelId];
+              if (expressIds && expressIds.size > 0) {
+                const siteId = Array.from(expressIds)[0];
+                const dataArr = await model.getItemsData([siteId]);
+                const siteData = Array.isArray(dataArr) && dataArr.length > 0 ? dataArr[0] : null;
+                
+                if (siteData) {
+                  console.log('[CDEViewer] IfcSite properties loaded:', siteData);
+                  const latVal = siteData.RefLatitude;
+                  const lngVal = siteData.RefLongitude;
+                  const elevVal = siteData.RefElevation;
+                  
+                  const parsedLat = parseIfcCoordinate(latVal);
+                  const parsedLng = parseIfcCoordinate(lngVal);
+                  const parsedElev = parseIfcElevation(elevVal);
+                  
+                  if (parsedLat !== null && parsedLng !== null && (Math.abs(parsedLat) > 0.1 || Math.abs(parsedLng) > 0.1)) {
+                    console.log(`[CDEViewer] Georeference coordinates detected from IfcSite: Lat=${parsedLat}, Lng=${parsedLng}, Elev=${parsedElev}`);
+                    setMapboxCenter([parsedLng, parsedLat]);
+                    const elevationValue = parsedElev !== null ? parsedElev : 0;
+                    setMapboxElevation(elevationValue);
+                    
+                    // Since it is direct WGS84, raw VN-2000 coordinates are not applicable
+                    setRawX(null);
+                    setRawY(null);
+                    setRawZ(elevationValue);
+                    
+                    engine.updateMapboxGISParameters([parsedLng, parsedLat], elevationValue, mapboxHeadingRef.current);
+                    foundGeoreference = true;
+                  }
+                }
+              }
+            }
+          } catch (siteErr) {
+            console.error('[CDEViewer] Failed to query site georeferencing:', siteErr);
+          }
+        }
+        
+        if (!foundGeoreference) {
+          console.log('[CDEViewer] No georeferencing information (VN-2000 or IfcSite) found in the model.');
         }
       });
 
