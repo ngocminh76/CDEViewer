@@ -29,6 +29,7 @@ export default function BimLayout() {
   const [mapboxEnabled, setMapboxEnabledState] = useState(false);
   const [mapboxCenter, setMapboxCenter] = useState<[number, number]>([105.804817, 21.028511]);
   const [mapboxElevation, setMapboxElevation] = useState<number>(0);
+  const [mapboxHeading, setMapboxHeading] = useState<number>(0);
 
   const engineRef = useRef<BimEngine | null>(null);
   const cleanupRef = useRef<(() => void) | null>(null);
@@ -88,11 +89,12 @@ export default function BimLayout() {
     }
   }, [mapboxEnabled]);
 
-  const handleUpdateMapboxCenterAndElevation = useCallback((center: [number, number], elevation: number) => {
+  const handleUpdateMapboxGISParameters = useCallback((center: [number, number], elevation: number, heading: number) => {
     if (engineRef.current) {
-      engineRef.current.updateMapboxCenterAndElevation(center, elevation);
+      engineRef.current.updateMapboxGISParameters(center, elevation, heading);
       setMapboxCenter(center);
       setMapboxElevation(elevation);
+      setMapboxHeading(heading);
     }
   }, []);
 
@@ -215,7 +217,8 @@ export default function BimLayout() {
                 mapboxEnabled={mapboxEnabled}
                 mapboxCenter={mapboxCenter}
                 mapboxElevation={mapboxElevation}
-                onUpdateCenter={handleUpdateMapboxCenterAndElevation}
+                mapboxHeading={mapboxHeading}
+                onUpdateCenter={handleUpdateMapboxGISParameters}
               />
             )}
           </Sider>

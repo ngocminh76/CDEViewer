@@ -49,6 +49,7 @@ export class MapBoxCoord {
 
   private _center: [number, number] = [105.804817, 21.028511]; // Default to Hanoi, Vietnam
   private _elevation: number = 0; // Default elevation (meters)
+  private _heading: number = 0; // Default heading (degrees)
 
   private updateTransform() {
     // parameters to ensure the model is georeferenced correctly on the map with elevation
@@ -88,5 +89,16 @@ export class MapBoxCoord {
 
   get elevation() {
     return this._elevation;
+  }
+
+  set heading(val: number) {
+    this._heading = val;
+    // Mapbox custom layer rotates model around Z-axis by modelRotate[2] (in radians)
+    this._modelRotate[2] = (val * Math.PI) / 180;
+    this.updateTransform();
+  }
+
+  get heading() {
+    return this._heading;
   }
 }

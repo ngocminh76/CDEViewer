@@ -9,7 +9,8 @@ interface RightPanelProps {
   mapboxEnabled: boolean;
   mapboxCenter: [number, number];
   mapboxElevation: number;
-  onUpdateCenter: (center: [number, number], elevation: number) => void;
+  mapboxHeading: number;
+  onUpdateCenter: (center: [number, number], elevation: number, heading: number) => void;
 }
 
 export default function RightPanel({
@@ -17,11 +18,13 @@ export default function RightPanel({
   mapboxEnabled,
   mapboxCenter,
   mapboxElevation,
+  mapboxHeading,
   onUpdateCenter,
 }: RightPanelProps) {
   const [lng, setLng] = useState(mapboxCenter[0]);
   const [lat, setLat] = useState(mapboxCenter[1]);
   const [elevation, setElevation] = useState(mapboxElevation);
+  const [heading, setHeading] = useState(mapboxHeading);
 
   useEffect(() => {
     setLng(mapboxCenter[0]);
@@ -31,6 +34,10 @@ export default function RightPanel({
   useEffect(() => {
     setElevation(mapboxElevation);
   }, [mapboxElevation]);
+
+  useEffect(() => {
+    setHeading(mapboxHeading);
+  }, [mapboxHeading]);
 
   const renderGisCard = () => (
     <Card
@@ -66,10 +73,21 @@ export default function RightPanel({
             precision={2}
           />
         </Descriptions.Item>
+        <Descriptions.Item label="Góc xoay (°)">
+          <InputNumber
+            value={heading}
+            onChange={(v) => v !== null && setHeading(v)}
+            style={{ width: '100%' }}
+            step={1}
+            min={-180}
+            max={180}
+            precision={1}
+          />
+        </Descriptions.Item>
       </Descriptions>
       <Button
         type="primary"
-        onClick={() => onUpdateCenter([lng, lat], elevation)}
+        onClick={() => onUpdateCenter([lng, lat], elevation, heading)}
         style={{ width: '100%' }}
       >
         Cập nhật & Bay tới

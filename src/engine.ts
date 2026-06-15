@@ -45,7 +45,7 @@ export interface BimEngine {
   // Mapbox
   initMapbox: (container: HTMLDivElement) => void;
   setMapboxEnabled: (enabled: boolean) => void;
-  updateMapboxCenterAndElevation: (center: [number, number], elevation: number) => void;
+  updateMapboxGISParameters: (center: [number, number], elevation: number, heading: number) => void;
 
   // Selection
   setupSelection: (
@@ -159,7 +159,7 @@ export async function createBimEngine(
         mapBoxComponent.scene.add(group.object);
       }
       mapBoxComponent.onResize();
-      updateMapboxCenterAndElevation(mapBoxComponent.coord.center, mapBoxComponent.coord.elevation);
+      updateMapboxGISParameters(mapBoxComponent.coord.center, mapBoxComponent.coord.elevation, mapBoxComponent.coord.heading);
     } else {
       // Move all loaded fragments/models back to local scene
       for (const group of fragments.list.values()) {
@@ -168,9 +168,10 @@ export async function createBimEngine(
     }
   }
 
-  function updateMapboxCenterAndElevation(center: [number, number], elevation: number) {
+  function updateMapboxGISParameters(center: [number, number], elevation: number, heading: number) {
     mapBoxComponent.coord.center = center;
     mapBoxComponent.coord.elevation = elevation;
+    mapBoxComponent.coord.heading = heading;
     if (mapBoxComponent.map) {
       mapBoxComponent.map.flyTo({
         center: center,
@@ -413,7 +414,7 @@ export async function createBimEngine(
     setClipperEnabled, createClip, deleteClip, deleteAllClips, getClipCount,
     zoomToFit, setCameraView,
     setToolMode, getToolMode,
-    initMapbox, setMapboxEnabled, updateMapboxCenterAndElevation,
+    initMapbox, setMapboxEnabled, updateMapboxGISParameters,
   };
 }
 
