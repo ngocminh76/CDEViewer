@@ -64,7 +64,7 @@ export default function RightPanel({
 
   useEffect(() => {
     setLocalKtt(ktt);
-    const presets = [105.5, 105.75, 108.5, 106.0];
+    const presets = [105.5, 105.0, 105.75, 107.75];
     if (!presets.includes(ktt)) {
       setShowCustomKtt(true);
       setCustomKttVal(ktt);
@@ -152,10 +152,10 @@ export default function RightPanel({
             onChange={handleKttSelectChange}
             style={{ width: '100%', marginBottom: showCustomKtt ? 6 : 0 }}
             options={[
-              { value: 105.5, label: "105°30' (Hà Nội, Trà Vinh, Hà Nam...)" },
-              { value: 105.75, label: "105°45' (TP.HCM, Bình Dương, Tây Ninh...)" },
-              { value: 108.5, label: "108°30' (Đà Nẵng, Quảng Nam, Quảng Ngãi...)" },
-              { value: 106.0, label: "106°00' (Hải Phòng, Hải Dương, Hưng Yên...)" },
+              { value: 105.5, label: "105°30' (Trà Vinh, Vĩnh Long, Hải Dương...)" },
+              { value: 105.0, label: "105°00' (Hà Nội, Hà Nam, Vĩnh Phúc...)" },
+              { value: 105.75, label: "105°45' (TP.HCM, Hải Phòng, Bình Dương...)" },
+              { value: 107.75, label: "107°45' (Đà Nẵng, Quảng Nam, Đồng Nai...)" },
               { value: 'custom', label: 'Tùy chọn...' },
             ]}
           />
