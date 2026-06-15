@@ -1,4 +1,5 @@
 import * as OBC from '@thatopen/components';
+import * as THREE from 'three';
 import { WASM_CONFIG, WORKER_URL } from './config.ts';
 
 import { MapBoxComponent } from './components/MapBoxComponent/index.ts';
@@ -27,6 +28,14 @@ export async function setupFragments(
 
   fragments.list.onItemSet.add(({ value: model }) => {
     model.useCamera(world.camera.three);
+
+    // Compute bounding box and center the model to (0, 0, 0)
+    // This resolves vertex offsets from Revit exports and avoids map/camera misplacement
+    const box = new THREE.Box3().setFromObject(model.object);
+    const center = new THREE.Vector3();
+    box.getCenter(center);
+    model.object.position.set(-center.x, -center.y, -center.z);
+
     const mapBoxComponent = components.get(MapBoxComponent);
     if (mapBoxComponent && mapBoxComponent.enabled) {
       mapBoxComponent.scene.add(model.object);

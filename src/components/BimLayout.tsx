@@ -27,7 +27,7 @@ export default function BimLayout() {
   const [toolMode, setToolModeState] = useState<ToolMode>('select');
   const [clipCount, setClipCount] = useState(0);
   const [mapboxEnabled, setMapboxEnabledState] = useState(false);
-  const [mapboxCenter, setMapboxCenter] = useState<[number, number]>([8.5523926, 47.4133122]);
+  const [mapboxCenter, setMapboxCenter] = useState<[number, number]>([105.804817, 21.028511]);
 
   const engineRef = useRef<BimEngine | null>(null);
   const cleanupRef = useRef<(() => void) | null>(null);

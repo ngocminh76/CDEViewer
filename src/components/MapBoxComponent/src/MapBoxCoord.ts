@@ -47,7 +47,7 @@ export class MapBoxCoord {
       .multiply(rotationZ);
   }
 
-  private _center: [number, number] = [8.5523926, 47.4133122];
+  private _center: [number, number] = [105.804817, 21.028511]; // Default to Hanoi, Vietnam
 
   set center(center: [number, number]) {
     this._center = [...center];
