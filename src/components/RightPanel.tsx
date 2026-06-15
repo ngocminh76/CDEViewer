@@ -152,7 +152,7 @@ export default function RightPanel({
             onChange={handleKttSelectChange}
             style={{ width: '100%', marginBottom: showCustomKtt ? 6 : 0 }}
             options={[
-              { value: 105.5, label: "105°30' (Hà Nội, Hà Nam, Hòa Bình...)" },
+              { value: 105.5, label: "105°30' (Hà Nội, Trà Vinh, Hà Nam...)" },
               { value: 105.75, label: "105°45' (TP.HCM, Bình Dương, Tây Ninh...)" },
               { value: 108.5, label: "108°30' (Đà Nẵng, Quảng Nam, Quảng Ngãi...)" },
               { value: 106.0, label: "106°00' (Hải Phòng, Hải Dương, Hưng Yên...)" },
