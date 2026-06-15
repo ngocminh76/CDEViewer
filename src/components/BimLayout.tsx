@@ -28,6 +28,7 @@ export default function BimLayout() {
   const [clipCount, setClipCount] = useState(0);
   const [mapboxEnabled, setMapboxEnabledState] = useState(false);
   const [mapboxCenter, setMapboxCenter] = useState<[number, number]>([105.804817, 21.028511]);
+  const [mapboxElevation, setMapboxElevation] = useState<number>(0);
 
   const engineRef = useRef<BimEngine | null>(null);
   const cleanupRef = useRef<(() => void) | null>(null);
@@ -87,10 +88,11 @@ export default function BimLayout() {
     }
   }, [mapboxEnabled]);
 
-  const handleUpdateMapboxCenter = useCallback((center: [number, number]) => {
+  const handleUpdateMapboxCenterAndElevation = useCallback((center: [number, number], elevation: number) => {
     if (engineRef.current) {
-      engineRef.current.updateMapboxCenter(center);
+      engineRef.current.updateMapboxCenterAndElevation(center, elevation);
       setMapboxCenter(center);
+      setMapboxElevation(elevation);
     }
   }, []);
 
@@ -212,7 +214,8 @@ export default function BimLayout() {
                 selection={selection}
                 mapboxEnabled={mapboxEnabled}
                 mapboxCenter={mapboxCenter}
-                onUpdateCenter={handleUpdateMapboxCenter}
+                mapboxElevation={mapboxElevation}
+                onUpdateCenter={handleUpdateMapboxCenterAndElevation}
               />
             )}
           </Sider>

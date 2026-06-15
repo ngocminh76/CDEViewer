@@ -8,22 +8,29 @@ interface RightPanelProps {
   selection: SelectionInfo | null;
   mapboxEnabled: boolean;
   mapboxCenter: [number, number];
-  onUpdateCenter: (center: [number, number]) => void;
+  mapboxElevation: number;
+  onUpdateCenter: (center: [number, number], elevation: number) => void;
 }
 
 export default function RightPanel({
   selection,
   mapboxEnabled,
   mapboxCenter,
+  mapboxElevation,
   onUpdateCenter,
 }: RightPanelProps) {
   const [lng, setLng] = useState(mapboxCenter[0]);
   const [lat, setLat] = useState(mapboxCenter[1]);
+  const [elevation, setElevation] = useState(mapboxElevation);
 
   useEffect(() => {
     setLng(mapboxCenter[0]);
     setLat(mapboxCenter[1]);
   }, [mapboxCenter]);
+
+  useEffect(() => {
+    setElevation(mapboxElevation);
+  }, [mapboxElevation]);
 
   const renderGisCard = () => (
     <Card
@@ -50,10 +57,19 @@ export default function RightPanel({
             precision={7}
           />
         </Descriptions.Item>
+        <Descriptions.Item label="Cao độ (m)">
+          <InputNumber
+            value={elevation}
+            onChange={(v) => v !== null && setElevation(v)}
+            style={{ width: '100%' }}
+            step={0.1}
+            precision={2}
+          />
+        </Descriptions.Item>
       </Descriptions>
       <Button
         type="primary"
-        onClick={() => onUpdateCenter([lng, lat])}
+        onClick={() => onUpdateCenter([lng, lat], elevation)}
         style={{ width: '100%' }}
       >
         Cập nhật & Bay tới

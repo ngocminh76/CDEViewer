@@ -48,13 +48,13 @@ export class MapBoxCoord {
   }
 
   private _center: [number, number] = [105.804817, 21.028511]; // Default to Hanoi, Vietnam
+  private _elevation: number = 0; // Default elevation (meters)
 
-  set center(center: [number, number]) {
-    this._center = [...center];
-    // parameters to ensure the model is georeferenced correctly on the map
+  private updateTransform() {
+    // parameters to ensure the model is georeferenced correctly on the map with elevation
     this._modelAsMercatorCoordinate = MAPBOX.MercatorCoordinate.fromLngLat(
-      {lng: center[0], lat: center[1]},
-      0
+      { lng: this._center[0], lat: this._center[1] },
+      this._elevation
     ) as MAPBOX.MercatorCoordinate;
 
     // transformation parameters to position, rotate and scale the 3D model onto the map
@@ -71,7 +71,22 @@ export class MapBoxCoord {
       scale: this._modelAsMercatorCoordinate.meterInMercatorCoordinateUnits(),
     };
   }
+
+  set center(center: [number, number]) {
+    this._center = [...center];
+    this.updateTransform();
+  }
+
   get center() {
     return this._center;
+  }
+
+  set elevation(val: number) {
+    this._elevation = val;
+    this.updateTransform();
+  }
+
+  get elevation() {
+    return this._elevation;
   }
 }

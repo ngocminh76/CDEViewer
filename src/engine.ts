@@ -45,7 +45,7 @@ export interface BimEngine {
   // Mapbox
   initMapbox: (container: HTMLDivElement) => void;
   setMapboxEnabled: (enabled: boolean) => void;
-  updateMapboxCenter: (center: [number, number]) => void;
+  updateMapboxCenterAndElevation: (center: [number, number], elevation: number) => void;
 
   // Selection
   setupSelection: (
@@ -159,7 +159,7 @@ export async function createBimEngine(
         mapBoxComponent.scene.add(group.object);
       }
       mapBoxComponent.onResize();
-      updateMapboxCenter(mapBoxComponent.coord.center);
+      updateMapboxCenterAndElevation(mapBoxComponent.coord.center, mapBoxComponent.coord.elevation);
     } else {
       // Move all loaded fragments/models back to local scene
       for (const group of fragments.list.values()) {
@@ -168,8 +168,9 @@ export async function createBimEngine(
     }
   }
 
-  function updateMapboxCenter(center: [number, number]) {
+  function updateMapboxCenterAndElevation(center: [number, number], elevation: number) {
     mapBoxComponent.coord.center = center;
+    mapBoxComponent.coord.elevation = elevation;
     if (mapBoxComponent.map) {
       mapBoxComponent.map.flyTo({
         center: center,
@@ -412,7 +413,7 @@ export async function createBimEngine(
     setClipperEnabled, createClip, deleteClip, deleteAllClips, getClipCount,
     zoomToFit, setCameraView,
     setToolMode, getToolMode,
-    initMapbox, setMapboxEnabled, updateMapboxCenter,
+    initMapbox, setMapboxEnabled, updateMapboxCenterAndElevation,
   };
 }
 
@@ -680,7 +681,7 @@ export async function loadIfcFile(
   onStatus?.(`Loading: ${file.name}...`);
   const buf = await file.arrayBuffer();
   const modelId = file.name.replace(/\.ifc$/i, '');
-  await engine.ifcLoader.load(new Uint8Array(buf), false, modelId, {
+  await engine.ifcLoader.load(new Uint8Array(buf), true, modelId, {
     processData: {
       progressCallback: (p: number) => {
         onStatus?.(`Loading: ${file.name} (${Math.round(p * 100)}%)`);
