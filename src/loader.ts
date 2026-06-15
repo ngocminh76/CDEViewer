@@ -1,6 +1,8 @@
 import * as OBC from '@thatopen/components';
 import { WASM_CONFIG, WORKER_URL } from './config.ts';
 
+import { MapBoxComponent } from './components/MapBoxComponent/index.ts';
+
 // ---------------------------------------------------------------------------
 // Setup FragmentsManager + IfcLoader (pattern tái sử dụng)
 // ---------------------------------------------------------------------------
@@ -25,7 +27,12 @@ export async function setupFragments(
 
   fragments.list.onItemSet.add(({ value: model }) => {
     model.useCamera(world.camera.three);
-    world.scene.three.add(model.object);
+    const mapBoxComponent = components.get(MapBoxComponent);
+    if (mapBoxComponent && mapBoxComponent.enabled) {
+      mapBoxComponent.scene.add(model.object);
+    } else {
+      world.scene.three.add(model.object);
+    }
     fragments.core.update(true);
   });
 

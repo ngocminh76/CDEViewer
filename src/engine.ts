@@ -3,6 +3,8 @@ import * as THREE from 'three';
 import * as OBC from '@thatopen/components';
 import { CAMERA_POSITION } from './config.ts';
 import { setupFragments, setupIfcLoader } from './loader.ts';
+import { MapBoxComponent } from './components/MapBoxComponent/index.ts';
+
 
 // ---------------------------------------------------------------------------
 // BIM Engine + Clipper + Hider + BoundingBoxer + Selection
@@ -39,6 +41,10 @@ export interface BimEngine {
   hider: OBC.Hider;
   clipper: OBC.Clipper;
   dispose: () => void;
+
+  // Mapbox
+  initMapbox: (container: HTMLDivElement) => void;
+  setMapboxEnabled: (enabled: boolean) => void;
 
   // Selection
   setupSelection: (
@@ -102,6 +108,9 @@ export async function createBimEngine(
     CAMERA_POSITION.tx, CAMERA_POSITION.ty, CAMERA_POSITION.tz,
   );
 
+  // --- MapBoxComponent ---
+  const mapBoxComponent = components.get(MapBoxComponent);
+
   onStatus?.('Setting up fragments...');
   const fragments = await setupFragments(components, world);
 
@@ -131,6 +140,30 @@ export async function createBimEngine(
 
   function getToolMode() {
     return toolMode;
+  }
+
+  // --- Mapbox actions ---
+  function initMapbox(container: HTMLDivElement) {
+    mapBoxComponent.container = container;
+  }
+
+  function setMapboxEnabled(enabled: boolean) {
+    mapBoxComponent.enabled = enabled;
+    if (enabled) {
+      if (!mapBoxComponent.isSetup) {
+        mapBoxComponent.setup();
+      }
+      // Move all loaded fragments/models to Mapbox scene
+      for (const group of fragments.list.values()) {
+        mapBoxComponent.scene.add(group.object);
+      }
+      mapBoxComponent.onResize();
+    } else {
+      // Move all loaded fragments/models back to local scene
+      for (const group of fragments.list.values()) {
+        world.scene.three.add(group.object);
+      }
+    }
   }
 
   // --- Build tree ---
@@ -366,6 +399,7 @@ export async function createBimEngine(
     setClipperEnabled, createClip, deleteClip, deleteAllClips, getClipCount,
     zoomToFit, setCameraView,
     setToolMode, getToolMode,
+    initMapbox, setMapboxEnabled,
   };
 }
 

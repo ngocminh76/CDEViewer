@@ -4,8 +4,6 @@ import {
   PlusOutlined,
   DeleteOutlined,
   ClearOutlined,
-  EyeOutlined,
-  CompressOutlined,
   ArrowUpOutlined,
   BorderOutlined,
   ArrowRightOutlined,
@@ -13,6 +11,7 @@ import {
   ArrowDownOutlined,
   BlockOutlined,
   SelectOutlined,
+  GlobalOutlined,
 } from '@ant-design/icons';
 import type { ToolMode } from '../engine.ts';
 
@@ -24,6 +23,8 @@ interface ToolPanelProps {
   onDeleteClip: () => void;
   onDeleteAllClips: () => void;
   onCameraView: (view: 'top' | 'front' | 'right' | 'left' | 'back' | 'perspective') => void;
+  mapboxEnabled: boolean;
+  onToggleMapbox: () => void;
 }
 
 export default function ToolPanel({
@@ -34,6 +35,8 @@ export default function ToolPanel({
   onDeleteClip,
   onDeleteAllClips,
   onCameraView,
+  mapboxEnabled,
+  onToggleMapbox,
 }: ToolPanelProps) {
   return (
     <div
@@ -71,6 +74,14 @@ export default function ToolPanel({
               onClick={() => onToolMode(toolMode === 'clip' ? 'select' : 'clip')}
             />
           </Badge>
+        </Tooltip>
+        <Tooltip title={mapboxEnabled ? "Switch to Local View" : "Switch to Mapbox View"} placement="right">
+          <Button
+            size="small"
+            type={mapboxEnabled ? 'primary' : 'default'}
+            icon={<GlobalOutlined />}
+            onClick={onToggleMapbox}
+          />
         </Tooltip>
       </Space>
 

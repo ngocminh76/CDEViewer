@@ -1,27 +1,52 @@
 import { useRef, useEffect } from 'react';
 
 interface ViewportProps {
-  onMount?: (el: HTMLDivElement) => void;
+  onMount?: (container3D: HTMLDivElement, containerMapBox: HTMLDivElement) => void;
+  mapboxEnabled: boolean;
 }
 
-export default function Viewport({ onMount }: ViewportProps) {
-  const ref = useRef<HTMLDivElement>(null);
+export default function Viewport({ onMount, mapboxEnabled }: ViewportProps) {
+  const container3D = useRef<HTMLDivElement>(null);
+  const containerMapBox = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (ref.current && onMount) {
-      onMount(ref.current);
+    if (container3D.current && containerMapBox.current && onMount) {
+      onMount(container3D.current, containerMapBox.current);
     }
   }, [onMount]);
 
   return (
     <div
-      ref={ref}
       style={{
         width: '100%',
         height: '100%',
         position: 'relative',
         overflow: 'hidden',
       }}
-    />
+    >
+      <div
+        ref={container3D}
+        style={{
+          width: '100%',
+          height: '100%',
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          display: mapboxEnabled ? 'none' : 'block',
+        }}
+      />
+      <div
+        ref={containerMapBox}
+        style={{
+          width: '100%',
+          height: '100%',
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          display: mapboxEnabled ? 'block' : 'none',
+        }}
+      />
+    </div>
   );
 }
+

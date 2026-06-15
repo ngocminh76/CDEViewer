@@ -26,6 +26,7 @@ export default function BimLayout() {
   const [selection, setSelection] = useState<SelectionInfo | null>(null);
   const [toolMode, setToolModeState] = useState<ToolMode>('select');
   const [clipCount, setClipCount] = useState(0);
+  const [mapboxEnabled, setMapboxEnabledState] = useState(false);
 
   const engineRef = useRef<BimEngine | null>(null);
   const cleanupRef = useRef<(() => void) | null>(null);
@@ -34,10 +35,11 @@ export default function BimLayout() {
     if (engineRef.current) setClipCount(engineRef.current.getClipCount());
   }, []);
 
-  const handleMount = useCallback(async (el: HTMLDivElement) => {
+  const handleMount = useCallback(async (container3D: HTMLDivElement, containerMapBox: HTMLDivElement) => {
     try {
-      const engine = await createBimEngine(el, setStatus);
+      const engine = await createBimEngine(container3D, setStatus);
       engineRef.current = engine;
+      engine.initMapbox(containerMapBox);
       setModelCount(engine.fragments.list.size);
 
       const canvas = engine.world.renderer!.three.domElement;
@@ -57,6 +59,32 @@ export default function BimLayout() {
       setStatus('Init failed');
     }
   }, [refreshClipCount]);
+
+  const handleToggleMapbox = useCallback(() => {
+    const engine = engineRef.current;
+    if (!engine) return;
+
+    const nextState = !mapboxEnabled;
+    try {
+      engine.setMapboxEnabled(nextState);
+      setMapboxEnabledState(nextState);
+    } catch (err: any) {
+      if (err.message === 'TOKEN_MISSING') {
+        const token = prompt('Bạn chưa cấu hình mã truy cập Mapbox (VITE_MAPBOX_TOKEN).\nVui lòng nhập mã Token của bạn vào đây để chạy thử:');
+        if (token && token.trim() !== '') {
+          localStorage.setItem('VITE_MAPBOX_TOKEN', token.trim());
+          try {
+            engine.setMapboxEnabled(nextState);
+            setMapboxEnabledState(nextState);
+          } catch (retryErr: any) {
+            alert('Lỗi khởi tạo Mapbox với Token vừa nhập: ' + retryErr.message);
+          }
+        }
+      } else {
+        alert('Lỗi khởi tạo bản đồ Mapbox: ' + err.message);
+      }
+    }
+  }, [mapboxEnabled]);
 
   useEffect(() => {
     return () => {
@@ -144,7 +172,7 @@ export default function BimLayout() {
         <Layout style={{ flex: 1 }}>
           {/* Viewport + floating ToolPanel */}
           <Content style={{ position: 'relative' }}>
-            <Viewport onMount={handleMount} />
+            <Viewport onMount={handleMount} mapboxEnabled={mapboxEnabled} />
             <ToolPanel
               toolMode={toolMode}
               onToolMode={handleToolMode}
@@ -153,6 +181,8 @@ export default function BimLayout() {
               onDeleteClip={handleDeleteClip}
               onDeleteAllClips={handleDeleteAllClips}
               onCameraView={handleCameraView}
+              mapboxEnabled={mapboxEnabled}
+              onToggleMapbox={handleToggleMapbox}
             />
           </Content>
 
