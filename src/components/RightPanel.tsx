@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Descriptions, Collapse, Table, Tag, Empty, Typography, Card, InputNumber, Button, Select, Radio, Alert } from 'antd';
 import type { SelectionInfo } from '../engine.ts';
 import { vn2000ToWgs84 } from '../utils/coordination.ts';
+import { VN2000_PROVINCES } from '../utils/vn2000-provinces.ts';
 
 const { Text } = Typography;
 
@@ -51,6 +52,7 @@ export default function RightPanel({
   const [localZone3deg, setLocalZone3deg] = useState(zone3deg);
   const [showCustomKtt, setShowCustomKtt] = useState(false);
   const [customKttVal, setCustomKttVal] = useState(ktt);
+  const [selectedProvince, setSelectedProvince] = useState<string | null>(null);
 
   // Local VN-2000 raw coordinates states
   const [localRawX, setLocalRawX] = useState<number | null>(rawX);
@@ -72,12 +74,15 @@ export default function RightPanel({
 
   useEffect(() => {
     setLocalKtt(ktt);
-    const presets = [105.5, 105.0, 105.75, 107.75];
-    if (!presets.includes(ktt)) {
+    // Auto-detect if KTT matches a province, otherwise show custom
+    const matchedProvince = VN2000_PROVINCES.find(p => p.ktt === ktt);
+    if (matchedProvince) {
+      setSelectedProvince(matchedProvince.name);
+      setShowCustomKtt(false);
+    } else {
+      setSelectedProvince('custom');
       setShowCustomKtt(true);
       setCustomKttVal(ktt);
-    } else {
-      setShowCustomKtt(false);
     }
   }, [ktt]);
 
@@ -124,12 +129,16 @@ export default function RightPanel({
     });
   };
 
-  const handleKttSelectChange = (val: string | number) => {
+  const handleKttSelectChange = (val: string) => {
+    setSelectedProvince(val);
     if (val === 'custom') {
       setShowCustomKtt(true);
     } else {
       setShowCustomKtt(false);
-      setLocalKtt(Number(val));
+      const province = VN2000_PROVINCES.find(p => p.name === val);
+      if (province) {
+        setLocalKtt(province.ktt);
+      }
     }
   };
 
@@ -193,18 +202,22 @@ export default function RightPanel({
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
         <div>
-          <span style={{ fontSize: 12, color: '#aaa', display: 'block', marginBottom: 4 }}>Kinh tuyến trục (KTT):</span>
+          <span style={{ fontSize: 12, color: '#aaa', display: 'block', marginBottom: 4 }}>Tỉnh/Thành phố (Tự động tra KTT):</span>
           <Select
-            value={showCustomKtt ? 'custom' : localKtt}
+            value={selectedProvince || 'custom'}
             onChange={handleKttSelectChange}
+            showSearch
             style={{ width: '100%', marginBottom: showCustomKtt ? 6 : 0 }}
             options={[
-              { value: 105.5, label: "105°30' (Trà Vinh, Vĩnh Long, Hải Dương...)" },
-              { value: 105.0, label: "105°00' (Hà Nội, Hà Nam, Vĩnh Phúc...)" },
-              { value: 105.75, label: "105°45' (TP.HCM, Hải Phòng, Bình Dương...)" },
-              { value: 107.75, label: "107°45' (Đà Nẵng, Quảng Nam, Đồng Nai...)" },
-              { value: 'custom', label: 'Tùy chọn...' },
+              ...VN2000_PROVINCES.map(p => ({
+                value: p.name,
+                label: `${p.name} (KTT: ${p.ktt.toFixed(2)}°)`
+              })),
+              { value: 'custom', label: 'Khác (Nhập thủ công)...' }
             ]}
+            filterOption={(input, option) =>
+              (option?.label ?? '').toLowerCase().includes(input.toLowerCase())
+            }
           />
           {showCustomKtt && (
             <InputNumber

@@ -1,18 +1,21 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { Layout, ConfigProvider, theme } from 'antd';
 import * as THREE from 'three';
+import * as OBC from '@thatopen/components';
 import TopToolbar from './TopToolbar.tsx';
 import ToolPanel from './ToolPanel.tsx';
 import Viewport from './Viewport.tsx';
 import RightPanel from './RightPanel.tsx';
 import BottomBar from './BottomBar.tsx';
 import LoginPage from './LoginPage.tsx';
+import ModelTree from './ModelTree.tsx';
 import {
   createBimEngine,
   loadIfcFile,
   type BimEngine,
   type SelectionInfo,
   type ToolMode,
+  type TreeNodeData,
 } from '../engine.ts';
 import { vn2000ToWgs84 } from '../utils/coordination.ts';
 
@@ -43,10 +46,12 @@ function parseIfcElevation(val: any): number | null {
 }
 
 export default function BimLayout() {
-  const [username, setUsername] = useState<string | null>(() => {
-    return localStorage.getItem('cde_viewer_user');
-  });
+  const [username, setUsername] = useState<string | null>(() => localStorage.getItem('cde_viewer_user'));
+
   const [rightCollapsed, setRightCollapsed] = useState(false);
+  const [leftCollapsed, setLeftCollapsed] = useState(false);
+  const [treeData, setTreeData] = useState<TreeNodeData[]>([]);
+
   const [status, setStatus] = useState('Initializing...');
   const [modelCount, setModelCount] = useState(0);
   const [selection, setSelection] = useState<SelectionInfo | null>(null);
@@ -108,8 +113,33 @@ export default function BimLayout() {
         const size = engine.fragments.list.size;
         setModelCount(size);
         const model = event.value;
+
+        // ONLY georeference on the FIRST model loaded
+        // Subsequent models are already correctly positioned relative to the first model in Three.js space.
+        if (size > 1) {
+          console.log('[CDEViewer] Additional model loaded. Skipping Mapbox georeferencing to preserve relative coordinates.');
+          return;
+        }
         
         let foundGeoreference = false;
+        let isCentered = true;
+        let bboxCenter = new THREE.Vector3();
+
+        // 0. Check bounding box to see if the engine centered the model
+        try {
+          const bboxer = engine.components.get(OBC.BoundingBoxer);
+          bboxer.addFromModels([new RegExp(`^${model.modelId}$`)]);
+          const box = bboxer.get();
+          box.getCenter(bboxCenter);
+          bboxer.dispose();
+
+          // If BBox center has large coordinates, the loader did NOT center it
+          if (Math.abs(bboxCenter.x) > 10000 && Math.abs(bboxCenter.z) > 10000) {
+            isCentered = false;
+          }
+        } catch (e) {
+          console.warn('[CDEViewer] Failed to compute BoundingBox:', e);
+        }
         
         // 1. Try to get from CRSData using getCRS()
         try {
@@ -129,7 +159,8 @@ export default function BimLayout() {
               const [lng, lat] = vn2000ToWgs84(east, north, kttRef.current, zone3degRef.current);
               setMapboxCenter([lng, lat]);
               setMapboxElevation(height);
-              engine.updateMapboxGISParameters([lng, lat], height, mapboxHeadingRef.current);
+              const mOrigin = isCentered ? [0, 0, 0] : [east, height, -north];
+              engine.updateMapboxGISParameters([lng, lat], height, mapboxHeadingRef.current, mOrigin as [number,number,number]);
               foundGeoreference = true;
             }
           }
@@ -146,24 +177,38 @@ export default function BimLayout() {
             console.log(`[CDEViewer] Model loaded. Base point coordinates:`, pos);
             
             // Check if coordination matrix has a large UTM/VN-2000 coordinate
-            if (Math.abs(pos.x) > 10000 && Math.abs(pos.y) > 10000) {
+            if (Math.abs(pos.x) > 10000 && Math.abs(pos.z) > 10000) {
               console.log('[CDEViewer] Georeference base point detected from coordination matrix:', pos);
               setRawX(pos.x);
-              setRawY(pos.y);
-              setRawZ(pos.z);
+              setRawY(-pos.z);
+              setRawZ(pos.y);
               // Convert to WGS84
-              const [lng, lat] = vn2000ToWgs84(pos.x, pos.y, kttRef.current, zone3degRef.current);
+              const [lng, lat] = vn2000ToWgs84(pos.x, -pos.z, kttRef.current, zone3degRef.current);
               setMapboxCenter([lng, lat]);
-              setMapboxElevation(pos.z);
-              engine.updateMapboxGISParameters([lng, lat], pos.z, mapboxHeadingRef.current);
+              setMapboxElevation(pos.y);
+              const mOrigin = isCentered ? [0, 0, 0] : [pos.x, pos.y, pos.z];
+              engine.updateMapboxGISParameters([lng, lat], pos.y, mapboxHeadingRef.current, mOrigin as [number,number,number]);
               foundGeoreference = true;
             }
           } catch (matrixErr) {
             console.warn('[CDEViewer] Failed to query model.getCoordinationMatrix():', matrixErr);
           }
         }
+
+        // 3. Try to compute from Bounding Box as fallback if not centered
+        if (!foundGeoreference && !isCentered) {
+          console.log('[CDEViewer] Georeference base point detected from BoundingBox:', bboxCenter);
+          setRawX(bboxCenter.x);
+          setRawY(-bboxCenter.z); // Northing is -Z
+          setRawZ(bboxCenter.y);  // Elevation is Y
+          const [lng, lat] = vn2000ToWgs84(bboxCenter.x, -bboxCenter.z, kttRef.current, zone3degRef.current);
+          setMapboxCenter([lng, lat]);
+          setMapboxElevation(bboxCenter.y);
+          engine.updateMapboxGISParameters([lng, lat], bboxCenter.y, mapboxHeadingRef.current, [bboxCenter.x, bboxCenter.y, bboxCenter.z]);
+          foundGeoreference = true;
+        }
         
-        // 3. If not found via coordination matrix, try to query from IfcSite (RefLatitude/RefLongitude)
+        // 4. If not found, try to query from IfcSite (RefLatitude/RefLongitude)
         if (!foundGeoreference) {
           try {
             const classifier = engine.classifier;
@@ -198,7 +243,8 @@ export default function BimLayout() {
                     setRawY(null);
                     setRawZ(elevationValue);
                     
-                    engine.updateMapboxGISParameters([parsedLng, parsedLat], elevationValue, mapboxHeadingRef.current);
+                    // IFCSite coordinates are usually geographic center, map it to BoundingBox center
+                    engine.updateMapboxGISParameters([parsedLng, parsedLat], elevationValue, mapboxHeadingRef.current, [bboxCenter.x, bboxCenter.y, bboxCenter.z]);
                     foundGeoreference = true;
                   }
                 }
@@ -222,6 +268,7 @@ export default function BimLayout() {
           setRawY(null);
           setRawZ(null);
         }
+        engine.buildTreeData().then(setTreeData);
       });
     } catch (err) {
       console.error('Engine init failed:', err);
@@ -371,6 +418,10 @@ export default function BimLayout() {
     try {
       await loadIfcFile(engine, file, setStatus);
       setModelCount(engine.fragments.list.size);
+      
+      // Update Tree Data after classifier finishes
+      engine.buildTreeData().then(setTreeData);
+
       // Auto zoom to fit loaded model
       setTimeout(async () => {
         await engine.zoomToFit();
@@ -403,6 +454,8 @@ export default function BimLayout() {
     <ConfigProvider theme={{ algorithm: theme.darkAlgorithm }}>
       <Layout style={{ height: '100%', background: '#141414' }}>
         <TopToolbar
+          leftCollapsed={leftCollapsed}
+          onToggleLeft={() => setLeftCollapsed(!leftCollapsed)}
           rightCollapsed={rightCollapsed}
           onToggleRight={() => setRightCollapsed(!rightCollapsed)}
           status={status}
@@ -412,6 +465,34 @@ export default function BimLayout() {
         />
 
         <Layout style={{ flex: 1 }}>
+          {/* Left - Model Tree */}
+          <Sider
+            width={280}
+            collapsible
+            collapsed={leftCollapsed}
+            collapsedWidth={0}
+            trigger={null}
+            style={{ background: '#1f1f1f', borderRight: '1px solid #303030', overflow: 'auto' }}
+          >
+            {!leftCollapsed && (
+              <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+                <div style={{ padding: '12px 12px 8px', borderBottom: '1px solid #303030', color: '#fff', fontWeight: 600 }}>
+                  Project Models
+                </div>
+                <div style={{ flex: 1, padding: 8, overflow: 'auto' }}>
+                  <ModelTree
+                    treeData={treeData}
+                    onHighlight={(m) => engineRef.current?.highlightItems(m)}
+                    onClearHighlight={() => engineRef.current?.clearHighlight()}
+                    onHide={(m) => engineRef.current?.setVisibility(false, m)}
+                    onIsolate={(m) => engineRef.current?.isolateItems(m)}
+                    onShowAll={() => engineRef.current?.showAll()}
+                  />
+                </div>
+              </div>
+            )}
+          </Sider>
+
           {/* Viewport + floating ToolPanel */}
           <Content style={{ position: 'relative' }}>
             <Viewport onMount={handleMount} mapboxEnabled={mapboxEnabled} />

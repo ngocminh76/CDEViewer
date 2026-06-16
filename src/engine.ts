@@ -45,7 +45,7 @@ export interface BimEngine {
   // Mapbox
   initMapbox: (container: HTMLDivElement) => void;
   setMapboxEnabled: (enabled: boolean) => void;
-  updateMapboxGISParameters: (center: [number, number], elevation: number, heading: number) => void;
+  updateMapboxGISParameters: (center: [number, number], elevation: number, heading: number, modelOrigin?: [number, number, number]) => void;
 
   // Selection
   setupSelection: (
@@ -159,7 +159,7 @@ export async function createBimEngine(
         mapBoxComponent.scene.add(group.object);
       }
       mapBoxComponent.onResize();
-      updateMapboxGISParameters(mapBoxComponent.coord.center, mapBoxComponent.coord.elevation, mapBoxComponent.coord.heading);
+      updateMapboxGISParameters(mapBoxComponent.coord.center, mapBoxComponent.coord.elevation, mapBoxComponent.coord.heading, mapBoxComponent.coord.modelOrigin);
     } else {
       // Move all loaded fragments/models back to local scene
       for (const group of fragments.list.values()) {
@@ -168,10 +168,11 @@ export async function createBimEngine(
     }
   }
 
-  function updateMapboxGISParameters(center: [number, number], elevation: number, heading: number) {
+  function updateMapboxGISParameters(center: [number, number], elevation: number, heading: number, modelOrigin: [number, number, number] = [0, 0, 0]) {
     mapBoxComponent.coord.center = center;
     mapBoxComponent.coord.elevation = elevation;
     mapBoxComponent.coord.heading = heading;
+    mapBoxComponent.coord.modelOrigin = modelOrigin;
     if (mapBoxComponent.map) {
       mapBoxComponent.map.flyTo({
         center: center,

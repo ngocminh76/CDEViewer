@@ -16,6 +16,8 @@ export class MapBoxCoord {
     rotateZ: number;
     scale: number;
   };
+  public modelOrigin: [number, number, number] = [0, 0, 0];
+
   get mapCamera(): THREE.Matrix4 {
     const rotationX = new THREE.Matrix4().makeRotationAxis(
       new THREE.Vector3(1, 0, 0),
@@ -29,6 +31,13 @@ export class MapBoxCoord {
       new THREE.Vector3(0, 0, 1),
       this._modelTransform.rotateZ
     );
+
+    const originOffset = new THREE.Matrix4().makeTranslation(
+      -this.modelOrigin[0],
+      -this.modelOrigin[1],
+      -this.modelOrigin[2]
+    );
+
     return new THREE.Matrix4()
       .makeTranslation(
         this._modelTransform.translateX,
@@ -44,7 +53,8 @@ export class MapBoxCoord {
       )
       .multiply(rotationX)
       .multiply(rotationY)
-      .multiply(rotationZ);
+      .multiply(rotationZ)
+      .multiply(originOffset);
   }
 
   private _center: [number, number] = [105.804817, 21.028511]; // Default to Hanoi, Vietnam

@@ -5,11 +5,14 @@ import {
   UploadOutlined,
   LogoutOutlined,
   UserOutlined,
+  AppstoreOutlined,
 } from '@ant-design/icons';
 
 const { Text } = Typography;
 
 interface TopToolbarProps {
+  leftCollapsed: boolean;
+  onToggleLeft: () => void;
   rightCollapsed: boolean;
   onToggleRight: () => void;
   status: string;
@@ -19,6 +22,8 @@ interface TopToolbarProps {
 }
 
 export default function TopToolbar({
+  leftCollapsed,
+  onToggleLeft,
   rightCollapsed,
   onToggleRight,
   status,
@@ -39,6 +44,9 @@ export default function TopToolbar({
       }}
     >
       <Space style={{ paddingLeft: 8 }}>
+        <Tooltip title={leftCollapsed ? 'Show models tree' : 'Hide models tree'}>
+          <Button type="text" icon={<AppstoreOutlined />} onClick={onToggleLeft} style={{ color: leftCollapsed ? '#999' : '#1890ff' }} />
+        </Tooltip>
         <ToolOutlined style={{ color: '#1890ff', fontSize: 18 }} />
         <Text strong style={{ color: '#fff', fontSize: 14 }}>CDEViewer — Standalone BIM Viewer</Text>
       </Space>
