@@ -99,6 +99,17 @@ export async function createBimEngine(
   world.renderer = new OBC.SimpleRenderer(components, viewportEl);
   world.renderer.showLogo = false;
   world.camera = new OBC.OrthoPerspectiveCamera(components);
+  
+  // Adjust camera controls for large models (e.g. kilometers long)
+  world.camera.controls.maxDistance = 10000000;
+  world.camera.controls.dollyToCursor = true; // Makes zooming more intuitive
+  world.camera.controls.truckSpeed = 2; // Increase panning speed
+  world.camera.controls.dollySpeed = 2; // Increase zoom speed
+
+  // Adjust far plane to prevent clipping long models
+  world.camera.threePersp.far = 1000000;
+  world.camera.threePersp.updateProjectionMatrix();
+
   components.init();
 
   world.scene.setup();
