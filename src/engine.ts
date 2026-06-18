@@ -168,6 +168,13 @@ export async function createBimEngine(
       // Move all loaded fragments/models to Mapbox scene
       for (const group of fragments.list.values()) {
         mapBoxComponent.scene.add(group.object);
+        // Disable frustum culling for meshes with valid geometry
+        // (Mapbox manually sets camera.projectionMatrix, making Three.js frustum check incorrect)
+        group.object.traverse((child: any) => {
+          if ((child.isMesh || child.isInstancedMesh) && child.geometry?.attributes?.position?.array) {
+            child.frustumCulled = false;
+          }
+        });
       }
       mapBoxComponent.onResize();
       updateMapboxGISParameters(mapBoxComponent.coord.center, mapBoxComponent.coord.elevation, mapBoxComponent.coord.heading, mapBoxComponent.coord.modelOrigin);
@@ -175,6 +182,12 @@ export async function createBimEngine(
       // Move all loaded fragments/models back to local scene
       for (const group of fragments.list.values()) {
         world.scene.three.add(group.object);
+        // Restore frustum culling for local scene
+        group.object.traverse((child: any) => {
+          if (child.isMesh || child.isInstancedMesh) {
+            child.frustumCulled = true;
+          }
+        });
       }
     }
   }

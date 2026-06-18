@@ -32,9 +32,34 @@ export async function setupFragments(
     const mapBoxComponent = components.get(MapBoxComponent);
     if (mapBoxComponent && mapBoxComponent.enabled) {
       mapBoxComponent.scene.add(model.object);
+      console.log(`[Loader DEBUG] Model added to MAPBOX scene.`);
     } else {
       world.scene.three.add(model.object);
+      console.log(`[Loader DEBUG] Model added to LOCAL scene.`);
     }
+
+    // Count meshes and fix frustum culling (delayed to allow mesh loading)
+    setTimeout(() => {
+      let meshCount = 0;
+      let instancedMeshCount = 0;
+      model.object.traverse((child: any) => {
+        if (child.isInstancedMesh) instancedMeshCount++;
+        else if (child.isMesh) meshCount++;
+      });
+      console.log(`[Loader DEBUG] Model meshes (after 3s): ${meshCount} Mesh + ${instancedMeshCount} InstancedMesh = ${meshCount + instancedMeshCount} total`);
+
+      // If Mapbox is enabled, disable frustum culling for valid meshes
+      const mbComp = components.get(MapBoxComponent);
+      if (mbComp && mbComp.enabled) {
+        model.object.traverse((child: any) => {
+          if ((child.isMesh || child.isInstancedMesh) && child.geometry?.attributes?.position?.array) {
+            child.frustumCulled = false;
+          }
+        });
+        console.log(`[Loader DEBUG] Disabled frustumCulled for Mapbox meshes.`);
+      }
+    }, 3000);
+
     fragments.core.update(true);
   });
 

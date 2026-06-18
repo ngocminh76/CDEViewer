@@ -163,9 +163,30 @@ export class MapBoxComponent
     this.initializeLabelRenderer();
   };
 
+  private _debugFrameCount = 0;
   private render = (_gl: any, matrix: number[]) => {
     const m = new THREE.Matrix4().fromArray(matrix);
     this.camera.projectionMatrix = m.multiply(this.coord.mapCamera);
+
+    // Debug: log once every 120 frames
+    this._debugFrameCount++;
+    if (this._debugFrameCount === 1 || this._debugFrameCount % 120 === 0) {
+      let totalMeshes = 0;
+      let frustumCulledCount = 0;
+      let visibleCount = 0;
+      let invisibleCount = 0;
+      this.scene.traverse((child: any) => {
+        if (child.isMesh || child.isInstancedMesh) {
+          totalMeshes++;
+          if (child.frustumCulled) frustumCulledCount++;
+          if (child.visible) visibleCount++;
+          else invisibleCount++;
+        }
+      });
+      console.log(`[MapBox DEBUG] Frame ${this._debugFrameCount}: scene.children=${this.scene.children.length}, totalMeshes=${totalMeshes}, frustumCulled=${frustumCulledCount}, visible=${visibleCount}, invisible=${invisibleCount}`);
+      console.log(`[MapBox DEBUG] coord: center=${JSON.stringify(this.coord.center)}, modelOrigin=${JSON.stringify(this.coord.modelOrigin)}, elevation=${this.coord.elevation}`);
+    }
+
     this.renderer.resetState();
     this.renderer.render(this.scene, this.camera);
     this.map!.triggerRepaint();
