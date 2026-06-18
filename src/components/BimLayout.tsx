@@ -24,13 +24,29 @@ const { Sider, Content } = Layout;
 function parseIfcCoordinate(val: any): number | null {
   if (!val) return null;
   const arr = Array.isArray(val) ? val : (val.value && Array.isArray(val.value) ? val.value : null);
-  if (!arr || arr.length === 0) return null;
   
-  // IFC RefLatitude / RefLongitude format: [degrees, minutes, seconds, microseconds]
-  const deg = Number(arr[0]) || 0;
-  const min = Number(arr[1]) || 0;
-  const sec = Number(arr[2]) || 0;
-  const microsec = Number(arr[3]) || 0;
+  let deg = 0, min = 0, sec = 0, microsec = 0;
+  
+  if (arr && arr.length > 0) {
+    deg = Number(arr[0]) || 0;
+    min = Number(arr[1]) || 0;
+    sec = Number(arr[2]) || 0;
+    microsec = Number(arr[3]) || 0;
+  } else if (typeof val === 'string' || (val.value && typeof val.value === 'string')) {
+    const str = typeof val === 'string' ? val : val.value;
+    // Support formats like "10°25'24\"166714" or "10 25 24 166714"
+    const match = str.match(/(-?\d+)[^\d]+(\d+)[^\d]+(\d+)[^\d]+(\d+)/);
+    if (match) {
+      deg = Number(match[1]) || 0;
+      min = Number(match[2]) || 0;
+      sec = Number(match[3]) || 0;
+      microsec = Number(match[4]) || 0;
+    } else {
+      return null;
+    }
+  } else {
+    return null;
+  }
   
   const sign = deg < 0 ? -1 : 1;
   const absDeg = Math.abs(deg);
@@ -152,11 +168,14 @@ export default function BimLayout() {
             
             if (Math.abs(east) > 10000 && Math.abs(north) > 10000) {
               console.log('[CDEViewer] Georeference base point detected from getCRS():', east, north, height);
-              setRawX(east);
-              setRawY(north);
+              const absoluteEast = Math.abs(east);
+              const absoluteNorth = Math.abs(north);
+              
+              setRawX(absoluteEast);
+              setRawY(absoluteNorth);
               setRawZ(height);
               // Convert to WGS84
-              const [lng, lat] = vn2000ToWgs84(east, north, kttRef.current, zone3degRef.current);
+              const [lng, lat] = vn2000ToWgs84(absoluteEast, absoluteNorth, kttRef.current, zone3degRef.current);
               setMapboxCenter([lng, lat]);
               setMapboxElevation(height);
               const mOrigin = isCentered ? [0, 0, 0] : [east, height, -north];
@@ -179,11 +198,14 @@ export default function BimLayout() {
             // Check if coordination matrix has a large UTM/VN-2000 coordinate
             if (Math.abs(pos.x) > 10000 && Math.abs(pos.z) > 10000) {
               console.log('[CDEViewer] Georeference base point detected from coordination matrix:', pos);
-              setRawX(pos.x);
-              setRawY(-pos.z);
+              const absoluteX = Math.abs(pos.x);
+              const absoluteY = Math.abs(pos.z);
+              
+              setRawX(absoluteX);
+              setRawY(absoluteY);
               setRawZ(pos.y);
               // Convert to WGS84
-              const [lng, lat] = vn2000ToWgs84(pos.x, -pos.z, kttRef.current, zone3degRef.current);
+              const [lng, lat] = vn2000ToWgs84(absoluteX, absoluteY, kttRef.current, zone3degRef.current);
               setMapboxCenter([lng, lat]);
               setMapboxElevation(pos.y);
               const mOrigin = isCentered ? [0, 0, 0] : [pos.x, pos.y, pos.z];
@@ -198,10 +220,13 @@ export default function BimLayout() {
         // 3. Try to compute from Bounding Box as fallback if not centered
         if (!foundGeoreference && !isCentered) {
           console.log('[CDEViewer] Georeference base point detected from BoundingBox:', bboxCenter);
-          setRawX(bboxCenter.x);
-          setRawY(-bboxCenter.z); // Northing is -Z
+          const absoluteEast = Math.abs(bboxCenter.x);
+          const absoluteNorth = Math.abs(bboxCenter.z);
+          
+          setRawX(absoluteEast);
+          setRawY(absoluteNorth);
           setRawZ(bboxCenter.y);  // Elevation is Y
-          const [lng, lat] = vn2000ToWgs84(bboxCenter.x, -bboxCenter.z, kttRef.current, zone3degRef.current);
+          const [lng, lat] = vn2000ToWgs84(absoluteEast, absoluteNorth, kttRef.current, zone3degRef.current);
           setMapboxCenter([lng, lat]);
           setMapboxElevation(bboxCenter.y);
           engine.updateMapboxGISParameters([lng, lat], bboxCenter.y, mapboxHeadingRef.current, [bboxCenter.x, bboxCenter.y, bboxCenter.z]);
