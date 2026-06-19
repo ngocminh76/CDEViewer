@@ -28,6 +28,8 @@ export interface TreeNodeData {
   icon?: string;
   children?: TreeNodeData[];
   modelIdMap?: Record<string, Set<number>>;
+  modelId?: string;
+  localId?: number;
 }
 
 export type ToolMode = 'select' | 'clip' | 'none';
@@ -209,53 +211,39 @@ export async function createBimEngine(
   // --- Build tree ---
   async function buildTreeData(): Promise<TreeNodeData[]> {
     const roots: TreeNodeData[] = [];
-
-    const storeyClass = classifier.list.get('Storeys');
-    if (storeyClass && storeyClass.size > 0) {
-      const children: TreeNodeData[] = [];
-      for (const [name, gd] of storeyClass) {
-        const map = await gd.get();
-        children.push({
-          key: `storey-${name}`,
-          title: name || 'Unnamed Storey',
-          icon: 'storey',
-          modelIdMap: cloneModelIdMap(map),
-        });
+    
+    for (const [modelId, model] of fragments.list.entries()) {
+      try {
+        const spatialTree = await model.getSpatialStructure();
+        if (spatialTree) {
+          const rootNode = buildSpatialNode(spatialTree, model, modelId);
+          if (rootNode) {
+            roots.push(rootNode);
+          }
+        }
+      } catch (err) {
+        console.warn(`[Build tree] Failed for model ${modelId}:`, err);
       }
-      roots.push({ key: 'root-storeys', title: `Storeys (${children.length})`, icon: 'building', children });
     }
-
-    const categoryClass = classifier.list.get('Categories');
-    if (categoryClass && categoryClass.size > 0) {
-      const children: TreeNodeData[] = [];
-      for (const [name, gd] of categoryClass) {
-        const map = await gd.get();
-        let count = 0;
-        for (const ids of Object.values(map)) count += (ids as Set<number>).size;
-        children.push({
-          key: `cat-${name}`,
-          title: `${name} (${count})`,
-          icon: 'element',
-          modelIdMap: cloneModelIdMap(map),
-        });
+    
+    if (roots.length === 0) {
+      const categoryClass = classifier.list.get('Categories');
+      if (categoryClass && categoryClass.size > 0) {
+        const children: TreeNodeData[] = [];
+        for (const [name, gd] of categoryClass) {
+          const map = await gd.get();
+          let count = 0;
+          for (const ids of Object.values(map)) count += (ids as Set<number>).size;
+          children.push({
+            key: `cat-${name}`,
+            title: `${name} (${count})`,
+            icon: 'element',
+            modelIdMap: cloneModelIdMap(map),
+          });
+        }
+        children.sort((a, b) => a.title.localeCompare(b.title));
+        roots.push({ key: 'root-categories', title: `Categories (${children.length})`, icon: 'category', children });
       }
-      children.sort((a, b) => a.title.localeCompare(b.title));
-      roots.push({ key: 'root-categories', title: `Categories (${children.length})`, icon: 'category', children });
-    }
-
-    const modelClass = classifier.list.get('Models');
-    if (modelClass && modelClass.size > 0) {
-      const children: TreeNodeData[] = [];
-      for (const [name, gd] of modelClass) {
-        const map = await gd.get();
-        children.push({
-          key: `model-${name}`,
-          title: name || 'Unnamed Model',
-          icon: 'model',
-          modelIdMap: cloneModelIdMap(map),
-        });
-      }
-      roots.push({ key: 'root-models', title: `Models (${children.length})`, icon: 'folder', children });
     }
 
     return roots;
@@ -453,7 +441,77 @@ function cloneModelIdMap(map: Record<string, Set<number>>): Record<string, Set<n
   return result;
 }
 
-async function getElementInfo(model: any, modelId: string, localId: number, components?: OBC.Components): Promise<SelectionInfo> {
+function buildSpatialNode(
+  item: any,
+  model: any,
+  modelId: string,
+): TreeNodeData | null {
+  if (!item) return null;
+  
+  const localId = item.localId;
+  const category = item.category || '';
+  
+  let name = '';
+  if (localId !== null && model.properties) {
+    const entity = model.properties[localId];
+    if (entity) {
+      name = unwrap(entity.LongName) || unwrap(entity.Name) || unwrap(entity.ObjectType) || '';
+    }
+  }
+  
+  let title = '';
+  const formattedCategory = formatIfcEntityName(category);
+  
+  if (name) {
+    title = `${formattedCategory} (${name})`;
+  } else {
+    title = localId !== null ? `${formattedCategory} #${localId}` : formattedCategory;
+  }
+  
+  const children: TreeNodeData[] = [];
+  if (item.children) {
+    for (const child of item.children) {
+      const childNode = buildSpatialNode(child, model, modelId);
+      if (childNode) children.push(childNode);
+    }
+  }
+  
+  const modelIdMap: Record<string, Set<number>> = {};
+  if (localId !== null) {
+    modelIdMap[modelId] = new Set([localId]);
+  }
+  
+  for (const child of children) {
+    if (child.modelIdMap) {
+      for (const [mid, ids] of Object.entries(child.modelIdMap)) {
+        if (!modelIdMap[mid]) modelIdMap[mid] = new Set();
+        for (const id of ids) {
+          modelIdMap[mid].add(id);
+        }
+      }
+    }
+  }
+  
+  let icon = 'element';
+  const catUpper = category.toUpperCase();
+  if (catUpper.includes('PROJECT')) icon = 'building';
+  else if (catUpper.includes('SITE')) icon = 'folder';
+  else if (catUpper.includes('BUILDING') && !catUpper.includes('STOREY') && !catUpper.includes('ELEMENT')) icon = 'building';
+  else if (catUpper.includes('STOREY')) icon = 'storey';
+  else if (catUpper.includes('MODEL')) icon = 'model';
+  
+  return {
+    key: `spatial-${modelId}-${localId || Math.random()}-${category}`,
+    title,
+    icon,
+    children: children.length > 0 ? children : undefined,
+    modelIdMap: Object.keys(modelIdMap).length > 0 ? modelIdMap : undefined,
+    modelId,
+    localId: localId !== null ? localId : undefined,
+  };
+}
+
+export async function getElementInfo(model: any, modelId: string, localId: number, components?: OBC.Components): Promise<SelectionInfo> {
   const attributes: Record<string, any> = {};
   const propertySets: PropertySet[] = [];
   try {

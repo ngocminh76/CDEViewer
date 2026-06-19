@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback, useEffect } from 'react';
 import { Tree, Input, Space, Button, Tooltip, Tag, Empty } from 'antd';
 import {
   ApartmentOutlined,
@@ -9,7 +9,7 @@ import {
   AimOutlined,
   ReloadOutlined,
 } from '@ant-design/icons';
-import type { TreeNodeData } from '../engine.ts';
+import type { TreeNodeData, SelectionInfo } from '../engine.ts';
 import type { TreeProps } from 'antd';
 
 const { Search } = Input;
@@ -50,14 +50,17 @@ interface ModelTreeProps {
   onHide?: (modelIdMap: Record<string, Set<number>>) => void;
   onIsolate?: (modelIdMap: Record<string, Set<number>>) => void;
   onShowAll?: () => void;
+  onSelectElement?: (modelId: string, localId: number) => void;
+  selection?: SelectionInfo | null;
 }
 
 export default function ModelTree({
-  treeData, onHighlight, onClearHighlight, onHide, onIsolate, onShowAll,
+  treeData, onHighlight, onClearHighlight, onHide, onIsolate, onShowAll, onSelectElement, selection,
 }: ModelTreeProps) {
   const [filter, setFilter] = useState('');
   const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
   const [checkedKeys, setCheckedKeys] = useState<string[]>([]);
+  const [expandedKeys, setExpandedKeys] = useState<string[]>([]);
 
   const antdTreeData = useMemo(() => toAntdTreeData(treeData, filter), [treeData, filter]);
 
@@ -69,6 +72,56 @@ export default function ModelTree({
     walk(treeData);
     return map;
   }, [treeData]);
+
+  // Expand top levels when treeData loads
+  useEffect(() => {
+    if (treeData.length > 0) {
+      setExpandedKeys(treeData.map((n) => n.key));
+    }
+  }, [treeData]);
+
+  // Synchronize 3D selection back to tree selection & auto-expand parents
+  useEffect(() => {
+    if (!selection) {
+      setSelectedKeys([]);
+      return;
+    }
+    
+    // Find matching node
+    let foundNode: TreeNodeData | null = null;
+    for (const node of nodeMap.values()) {
+      if (node.modelId === selection.modelId && node.localId === selection.localId) {
+        foundNode = node;
+        break;
+      }
+    }
+    
+    if (foundNode) {
+      setSelectedKeys([foundNode.key]);
+      
+      const newExpandedKeys = new Set(expandedKeys);
+      
+      function getParentKeys(nodes: TreeNodeData[], targetKey: string, path: string[]): boolean {
+        for (const n of nodes) {
+          if (n.key === targetKey) return true;
+          if (n.children) {
+            path.push(n.key);
+            if (getParentKeys(n.children, targetKey, path)) return true;
+            path.pop();
+          }
+        }
+        return false;
+      }
+      
+      const path: string[] = [];
+      if (getParentKeys(treeData, foundNode.key, path)) {
+        for (const pk of path) {
+          newExpandedKeys.add(pk);
+        }
+        setExpandedKeys(Array.from(newExpandedKeys));
+      }
+    }
+  }, [selection, nodeMap, treeData]);
 
   const getNodeModelIdMap = useCallback(
     (key: string): Record<string, Set<number>> | null => {
@@ -93,8 +146,20 @@ export default function ModelTree({
 
   const handleSelect: TreeProps['onSelect'] = (keys) => {
     setSelectedKeys(keys as string[]);
-    if (keys.length === 0) { onClearHighlight?.(); return; }
-    const map = getNodeModelIdMap(keys[0] as string);
+    if (keys.length === 0) { 
+      onClearHighlight?.(); 
+      return; 
+    }
+    
+    const key = keys[0] as string;
+    const node = nodeMap.get(key);
+    
+    // Call the callback to select the element when tree node is clicked
+    if (node && node.modelId && node.localId !== undefined) {
+      onSelectElement?.(node.modelId, node.localId);
+    }
+    
+    const map = getNodeModelIdMap(key);
     if (map) onHighlight?.(map);
   };
 
@@ -131,7 +196,7 @@ export default function ModelTree({
         {checkedKeys.length > 0 && <Tag color="blue">{checkedKeys.length} checked</Tag>}
       </Space>
       <div style={{ flex: 1, overflow: 'auto' }}>
-        <Tree showIcon checkable defaultExpandedKeys={treeData.map((n) => n.key)} selectedKeys={selectedKeys} checkedKeys={checkedKeys} onSelect={handleSelect} onCheck={handleCheck} treeData={antdTreeData} style={{ fontSize: 12 }} />
+        <Tree showIcon checkable expandedKeys={expandedKeys} onExpand={(keys) => setExpandedKeys(keys as string[])} selectedKeys={selectedKeys} checkedKeys={checkedKeys} onSelect={handleSelect} onCheck={handleCheck} treeData={antdTreeData} style={{ fontSize: 12 }} />
       </div>
     </div>
   );

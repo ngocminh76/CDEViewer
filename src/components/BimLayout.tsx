@@ -12,6 +12,7 @@ import ModelTree from './ModelTree.tsx';
 import {
   createBimEngine,
   loadIfcFile,
+  getElementInfo,
   type BimEngine,
   type SelectionInfo,
   type ToolMode,
@@ -105,6 +106,19 @@ export default function BimLayout() {
 
   const engineRef = useRef<BimEngine | null>(null);
   const cleanupRef = useRef<(() => void) | null>(null);
+
+  const handleSelectElement = useCallback(async (modelId: string, localId: number) => {
+    if (!engineRef.current) return;
+    const model = engineRef.current.fragments.list.get(modelId);
+    if (!model) return;
+    
+    try {
+      const info = await getElementInfo(model, modelId, localId, engineRef.current.components);
+      setSelection(info);
+    } catch (err) {
+      console.warn('[handleSelectElement] Failed to load element info:', err);
+    }
+  }, []);
 
   const refreshClipCount = useCallback(() => {
     if (engineRef.current) setClipCount(engineRef.current.getClipCount());
@@ -513,6 +527,8 @@ export default function BimLayout() {
                     onHide={(m) => engineRef.current?.setVisibility(false, m)}
                     onIsolate={(m) => engineRef.current?.isolateItems(m)}
                     onShowAll={() => engineRef.current?.showAll()}
+                    onSelectElement={handleSelectElement}
+                    selection={selection}
                   />
                 </div>
               </div>
