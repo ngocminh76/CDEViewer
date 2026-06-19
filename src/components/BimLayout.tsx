@@ -65,6 +65,7 @@ export default function BimLayout() {
   const [username, setUsername] = useState<string | null>(() => localStorage.getItem('cde_viewer_user'));
 
   const [rightCollapsed, setRightCollapsed] = useState(false);
+  const [rightWidth, setRightWidth] = useState(360); // Resizable right panel width
   const [leftCollapsed, setLeftCollapsed] = useState(false);
   const [treeData, setTreeData] = useState<TreeNodeData[]>([]);
 
@@ -536,13 +537,51 @@ export default function BimLayout() {
 
           {/* Right — Properties */}
           <Sider
-            width={320}
+            width={rightWidth}
             collapsible
             collapsed={rightCollapsed}
             collapsedWidth={0}
             trigger={null}
-            style={{ background: '#1f1f1f', borderLeft: '1px solid #303030', overflow: 'auto' }}
+            style={{ background: '#1f1f1f', borderLeft: '1px solid #303030', overflow: 'hidden', position: 'relative' }}
           >
+            {/* Drag handle to resize panel */}
+            {!rightCollapsed && (
+              <div
+                style={{
+                  width: '6px',
+                  cursor: 'col-resize',
+                  position: 'absolute',
+                  left: 0,
+                  top: 0,
+                  bottom: 0,
+                  zIndex: 100,
+                  background: 'rgba(255, 255, 255, 0.05)',
+                  transition: 'background 0.2s',
+                }}
+                onMouseOver={(e) => e.currentTarget.style.background = '#1890ff'}
+                onMouseOut={(e) => e.currentTarget.style.background = 'rgba(255, 255, 255, 0.05)'}
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  const startX = e.clientX;
+                  const startWidth = rightWidth;
+                  
+                  const handleMouseMove = (moveEvent: MouseEvent) => {
+                    const newWidth = startWidth - (moveEvent.clientX - startX);
+                    if (newWidth >= 280 && newWidth <= 800) {
+                      setRightWidth(newWidth);
+                    }
+                  };
+                  
+                  const handleMouseUp = () => {
+                    document.removeEventListener('mousemove', handleMouseMove);
+                    document.removeEventListener('mouseup', handleMouseUp);
+                  };
+                  
+                  document.addEventListener('mousemove', handleMouseMove);
+                  document.addEventListener('mouseup', handleMouseUp);
+                }}
+              />
+            )}
             {!rightCollapsed && (
               <RightPanel
                 selection={selection}

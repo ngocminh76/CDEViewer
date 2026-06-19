@@ -28,3 +28,80 @@ canvas {
   left: 0;
   outline: none;
 }
+
+/* Custom property tree table styling matching BIMVision */
+.property-tree-table {
+  margin-top: 4px;
+}
+
+.property-tree-table .ant-table {
+  background: transparent !important;
+}
+
+.property-tree-table .ant-table-thead > tr > th {
+  background: #1a1a29 !important;
+  color: #a0aec0 !important;
+  border-bottom: 1px solid #2d3748 !important;
+  border-right: 1px solid #2d3748 !important;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 6px 8px !important;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.property-tree-table .ant-table-thead > tr > th:last-child {
+  border-right: none !important;
+}
+
+.property-tree-table .ant-table-tbody > tr > td {
+  border-bottom: 1px solid #2d2d3f !important;
+  border-right: 1px solid #2d2d3f !important;
+  padding: 4px 8px !important;
+  font-size: 11px;
+  background: transparent !important;
+}
+
+.property-tree-table .ant-table-tbody > tr > td:last-child {
+  border-right: none !important;
+}
+
+/* Zebra striping for parent categories */
+.property-tree-table .ant-table-row-level-0 {
+  background: rgba(255, 255, 255, 0.03) !important;
+}
+
+.property-tree-table .ant-table-row-level-0:hover > td {
+  background: rgba(255, 255, 255, 0.07) !important;
+}
+
+.property-tree-table .ant-table-row-level-1:hover > td {
+  background: rgba(24, 144, 255, 0.1) !important;
+}
+
+/* Custom expand icon styling */
+.property-tree-table .ant-table-row-expand-icon {
+  border: 1px solid #4a5568 !important;
+  background: #2d3748 !important;
+  color: #cbd5e0 !important;
+  width: 14px;
+  height: 14px;
+  line-height: 12px;
+  font-size: 9px;
+  margin-right: 6px !important;
+}
+
+.property-tree-table .ant-table-row-expand-icon:hover {
+  border-color: #1890ff !important;
+  color: #1890ff !important;
+}
+
+/* Right panel tabs customization */
+.ant-tabs-nav {
+  margin-bottom: 6px !important;
+}
+
+.ant-tabs-tab {
+  padding: 6px 12px !important;
+}
+

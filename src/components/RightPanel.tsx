@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
-import { Descriptions, Collapse, Table, Tag, Empty, Typography, Card, InputNumber, Button, Select, Radio, Alert } from 'antd';
-import type { SelectionInfo } from '../engine.ts';
+import { Descriptions, Collapse, Table, Tag, Empty, Typography, Card, InputNumber, Button, Select, Radio, Alert, Tabs } from 'antd';
+import type { SelectionInfo, PropertySet } from '../engine.ts';
 import { vn2000ToWgs84 } from '../utils/coordination.ts';
 import { VN2000_PROVINCES } from '../utils/vn2000-provinces.ts';
 
@@ -310,46 +310,179 @@ export default function RightPanel({
 
   const { modelId, localId, attributes, propertySets } = selection;
 
+  // Lọc các nhóm thuộc tính cho các tab tương ứng (giống BIMVision)
+  const locationPsets = propertySets.filter(p => p.name.includes('Location') || p.name.includes('📍'));
+  const classificationPsets = propertySets.filter(p => p.name.includes('Classification') || p.name.includes('🏷️'));
+  
+  // Relations: gồm Type (🔧), Material (🧱) và các nhóm liên quan đến ObjectType của cấu kiện
+  const relationPsets = propertySets.filter(p => 
+    p.name.includes('Type') || 
+    p.name.includes('🔧') ||
+    p.name.includes('Material') ||
+    p.name.includes('🧱') ||
+    (attributes.ObjectType && p.name.includes(attributes.ObjectType))
+  );
+  
+  // Properties: tất cả các nhóm còn lại
+  const mainPropertiesPsets = propertySets.filter(p => 
+    !locationPsets.includes(p) && 
+    !classificationPsets.includes(p) && 
+    !relationPsets.includes(p)
+  );
+
+  // Sắp xếp các nhóm trong Properties tab theo thứ tự bảng chữ cái A-Z (Element Specific luôn ở đầu)
+  const sortedPropertiesPsets = [...mainPropertiesPsets].sort((a, b) => {
+    if (a.name === 'Element Specific') return -1;
+    if (b.name === 'Element Specific') return 1;
+    
+    // Loại bỏ các icon/ký tự đặc biệt ở đầu khi so sánh tên
+    const nameA = a.name.replace(/^[📋📐🧱🏷️📍🔧👥]\s*/, '');
+    const nameB = b.name.replace(/^[📋📐🧱🏷️📍🔧👥]\s*/, '');
+    const cleanA = nameA.replace(/^[^\w\sÀ-ỹ]/g, '').trim();
+    const cleanB = nameB.replace(/^[^\w\sÀ-ỹ]/g, '').trim();
+    return cleanA.localeCompare(cleanB, 'vi', { sensitivity: 'base' });
+  });
+
+  const propertyColumns = [
+    { 
+      title: 'Name', 
+      dataIndex: 'name', 
+      key: 'name', 
+      width: '50%',
+      render: (text: string, record: any) => {
+        const isGroup = record.children !== undefined;
+        return (
+          <span style={{ 
+            color: isGroup ? '#90cdf4' : '#cbd5e0', 
+            fontSize: 11,
+            fontWeight: isGroup ? 600 : 'normal'
+          }}>
+            {text}
+          </span>
+        );
+      }
+    },
+    { 
+      title: 'Value', 
+      dataIndex: 'value', 
+      key: 'value', 
+      width: '35%',
+      render: (text: string) => <span style={{ color: '#e2e8f0', fontSize: 11, fontWeight: 500 }}>{text}</span>
+    },
+    { 
+      title: 'Unit', 
+      dataIndex: 'unit', 
+      key: 'unit', 
+      width: '15%',
+      render: (text: string) => text ? <Tag color="default" style={{ fontSize: 9, margin: 0, padding: '0 4px', background: '#2d3748', borderColor: '#4a5568', color: '#cbd5e0' }}>{text}</Tag> : null
+    },
+  ];
+
+  const renderPsetTable = (psets: PropertySet[]) => {
+    if (psets.length === 0) {
+      return (
+        <Empty 
+          image={Empty.PRESENTED_IMAGE_SIMPLE} 
+          description={<span style={{ color: '#718096', fontSize: 11 }}>Không có dữ liệu</span>} 
+          style={{ padding: '20px 0', margin: 0 }} 
+        />
+      );
+    }
+
+    const dataSource = psets.map((pset, psetIndex) => ({
+      key: `pset-${psetIndex}-${pset.name}`,
+      name: pset.name,
+      value: '',
+      unit: '',
+      children: pset.properties.map((prop, propIndex) => ({
+        key: `prop-${psetIndex}-${propIndex}-${prop.name}`,
+        name: prop.name,
+        value: prop.value,
+        unit: prop.unit,
+      })),
+    }));
+
+    return (
+      <Table
+        key={`${localId}-${psets.length}`}
+        dataSource={dataSource}
+        columns={propertyColumns}
+        size="small"
+        pagination={false}
+        expandable={{
+          defaultExpandAllRows: true,
+        }}
+        bordered
+        style={{ background: 'transparent' }}
+        className="property-tree-table"
+      />
+    );
+  };
+
+  const tabItems = [
+    {
+      key: 'properties',
+      label: <span style={{ fontSize: 11, fontWeight: 500 }}>Properties</span>,
+      children: renderPsetTable(sortedPropertiesPsets),
+    },
+    {
+      key: 'location',
+      label: <span style={{ fontSize: 11, fontWeight: 500 }}>Location</span>,
+      children: renderPsetTable(locationPsets),
+    },
+    {
+      key: 'classification',
+      label: <span style={{ fontSize: 11, fontWeight: 500 }}>Classification</span>,
+      children: renderPsetTable(classificationPsets),
+    },
+    {
+      key: 'relations',
+      label: <span style={{ fontSize: 11, fontWeight: 500 }}>Relations</span>,
+      children: renderPsetTable(relationPsets),
+    },
+  ];
+
   return (
-    <div style={{ padding: 12, overflow: 'auto', height: '100%' }}>
+    <div style={{ padding: 12, overflow: 'auto', height: '100%', display: 'flex', flexDirection: 'column', gap: 12 }}>
       {mapboxEnabled && renderGisCard()}
 
-      <div style={{ marginBottom: 12 }}>
-        <Tag color="blue">{modelId}</Tag>
-        <Tag color="orange">#{localId}</Tag>
+      <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+        <Tag color="blue" style={{ margin: 0 }}>{modelId}</Tag>
+        <Tag color="orange" style={{ margin: 0 }}>#{localId}</Tag>
       </div>
-      <Descriptions bordered size="small" column={1} style={{ marginBottom: 12 }}>
-        {attributes.Name && <Descriptions.Item label="Name">{attributes.Name}</Descriptions.Item>}
-        {(attributes.type !== undefined || attributes._category !== undefined) && (
-          <Descriptions.Item label="Type">
-            <Tag>{String(attributes.type ?? attributes._category ?? '')}</Tag>
+
+      <Descriptions bordered size="small" column={1} style={{ background: '#171725', borderRadius: 4, overflow: 'hidden' }}>
+        {attributes.Name && (
+          <Descriptions.Item label={<span style={{ fontSize: 11, color: '#a0aec0' }}>Name</span>}>
+            <span style={{ fontSize: 11, color: '#e2e8f0', fontWeight: 500 }}>{attributes.Name}</span>
           </Descriptions.Item>
         )}
-        {attributes.GlobalId && <Descriptions.Item label="GlobalId"><Text copyable style={{ fontSize: 11 }}>{attributes.GlobalId}</Text></Descriptions.Item>}
-        {attributes.Tag && <Descriptions.Item label="Tag">{attributes.Tag}</Descriptions.Item>}
+        {(attributes.type !== undefined || attributes._category !== undefined) && (
+          <Descriptions.Item label={<span style={{ fontSize: 11, color: '#a0aec0' }}>Type</span>}>
+            <Tag color="purple" style={{ fontSize: 10, margin: 0 }}>{String(attributes.type ?? attributes._category ?? '')}</Tag>
+          </Descriptions.Item>
+        )}
+        {attributes.GlobalId && (
+          <Descriptions.Item label={<span style={{ fontSize: 11, color: '#a0aec0' }}>GlobalId</span>}>
+            <Text copyable style={{ fontSize: 10, color: '#cbd5e0' }}>{attributes.GlobalId}</Text>
+          </Descriptions.Item>
+        )}
+        {attributes.Tag && (
+          <Descriptions.Item label={<span style={{ fontSize: 11, color: '#a0aec0' }}>Tag</span>}>
+            <span style={{ fontSize: 11, color: '#e2e8f0' }}>{attributes.Tag}</span>
+          </Descriptions.Item>
+        )}
       </Descriptions>
-      {propertySets.length > 0 && (
-        <Collapse
-          size="small"
-          defaultActiveKey={propertySets.map((_, i) => String(i))}
-          items={propertySets.map((pset, i) => ({
-            key: String(i),
-            label: <span>{pset.name} <Tag style={{ marginLeft: 4 }}>{pset.properties.length}</Tag></span>,
-            children: (
-              <Table
-                dataSource={pset.properties}
-                columns={[
-                  { title: 'Property', dataIndex: 'name', key: 'name', width: '40%' },
-                  { title: 'Value', dataIndex: 'value', key: 'value' },
-                ]}
-                size="small"
-                pagination={false}
-                rowKey="name"
-              />
-            ),
-          }))}
+
+      <div style={{ flex: 1, minHeight: 0 }}>
+        <Tabs 
+          defaultActiveKey="properties" 
+          items={tabItems} 
+          size="small" 
+          style={{ color: '#e2e8f0' }}
+          tabBarStyle={{ marginBottom: 8 }}
         />
-      )}
+      </div>
     </div>
   );
 }

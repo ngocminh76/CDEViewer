@@ -19,7 +19,7 @@ export interface SelectionInfo {
 
 export interface PropertySet {
   name: string;
-  properties: { name: string; value: string }[];
+  properties: { name: string; value: string; unit?: string }[];
 }
 
 export interface TreeNodeData {
@@ -419,7 +419,7 @@ export async function createBimEngine(
 
       const model = fragments.list.get(pick.modelId);
       if (!model) return;
-      const info = await getElementInfo(model, pick.modelId, pick.localId);
+      const info = await getElementInfo(model, pick.modelId, pick.localId, components);
       onSelect(info);
     }
 
@@ -453,7 +453,7 @@ function cloneModelIdMap(map: Record<string, Set<number>>): Record<string, Set<n
   return result;
 }
 
-async function getElementInfo(model: any, modelId: string, localId: number): Promise<SelectionInfo> {
+async function getElementInfo(model: any, modelId: string, localId: number, components?: OBC.Components): Promise<SelectionInfo> {
   const attributes: Record<string, any> = {};
   const propertySets: PropertySet[] = [];
   try {
@@ -478,30 +478,402 @@ async function getElementInfo(model: any, modelId: string, localId: number): Pro
     }
 
     console.group(`🔍 [Props] Element ${modelId}:${localId}`);
+    let clone: any = null;
     try {
-      const clone = JSON.parse(JSON.stringify(itemData, (_, v) => {
+      clone = JSON.parse(JSON.stringify(itemData, (_, v) => {
         if (v instanceof Set) return [...v];
         if (v instanceof Map) return Object.fromEntries(v);
         return v;
       }));
-      console.log('FULL DATA TREE:', clone);
-    } catch (e) { console.log('Raw itemData:', itemData); }
+      console.log('1. CÂY DỮ LIỆU THÔ (Raw JSON Tree):', clone);
+      console.log('2. CHUỖI JSON ĐẸP (Pretty JSON String):\n', JSON.stringify(clone, null, 2));
+    } catch (e) {
+      console.log('Raw itemData:', itemData);
+    }
     console.groupEnd();
 
     if (itemData && typeof itemData === 'object') {
-      parseItemDataToSections(itemData, attributes, propertySets);
+      const projectUnits = getProjectUnits(model);
+      parseItemDataToSections(itemData, attributes, propertySets, projectUnits, model);
+
+      // --- TÍNH TOÁN CÁC THÔNG SỐ HÌNH HỌC KHÔNG GIAN NHƯ BIMVISION ---
+      if (components) {
+        try {
+          const boxer = components.get(OBC.BoundingBoxer);
+          const selectMap = { [modelId]: new Set([localId]) };
+          
+          // Thêm await vì addFromModelIdMap là một Async function trả về Promise!
+          await boxer.addFromModelIdMap(selectMap);
+          const box = boxer.get();
+          boxer.dispose();
+
+          if (!box.isEmpty()) {
+            const center = new THREE.Vector3();
+            const size = new THREE.Vector3();
+            box.getCenter(center);
+            box.getSize(size);
+
+            // Three.js mặc định là mét (m), nhân 1000 đổi sang mm như BIMVision
+            const toMM = 1000;
+            const round3 = (v: number) => String((v * toMM).toFixed(3));
+
+            // Truy vấn Spatial Structure để lấy tên Project và Building cha của cấu kiện
+            let projectName = '';
+            let buildingName = '';
+            try {
+              const spatialTree = await model.getSpatialStructure();
+              const path: any[] = [];
+              
+              function findPath(node: any, targetId: number): boolean {
+                if (!node) return false;
+                path.push(node);
+                if (node.expressID === targetId) return true;
+                if (Array.isArray(node.children)) {
+                  for (const child of node.children) {
+                    if (findPath(child, targetId)) return true;
+                  }
+                }
+                path.pop();
+                return false;
+              }
+              
+              if (findPath(spatialTree, localId)) {
+                const projectNode = path.find(n => n.type === 'IFCPROJECT');
+                const buildingNode = path.find(n => n.type === 'IFCBUILDING');
+                const parentIds: number[] = [];
+                if (projectNode) parentIds.push(projectNode.expressID);
+                if (buildingNode) parentIds.push(buildingNode.expressID);
+                
+                if (parentIds.length > 0) {
+                  const parentsData = await model.getItemsData(parentIds);
+                  if (parentsData) {
+                    if (projectNode) {
+                      const projData = parentsData.get?.(projectNode.expressID) || parentsData[0];
+                      projectName = unwrap(projData?.LongName) || unwrap(projData?.Name) || '';
+                    }
+                    if (buildingNode) {
+                      const buildData = parentsData.get?.(buildingNode.expressID) || parentsData[1] || parentsData[0];
+                      buildingName = unwrap(buildData?.LongName) || unwrap(buildData?.Name) || '';
+                    }
+                  }
+                }
+              }
+            } catch (spatialErr) {
+              console.warn('[Spatial Parents Query] Failed:', spatialErr);
+            }
+
+            const geometryProps = [
+              { name: 'Has Own Geometry', value: 'Yes' },
+              { name: 'Children Have Geometry', value: 'No' },
+              { name: 'Global X', value: round3(center.x), unit: 'mm' },
+              { name: 'Global Y', value: round3(center.y), unit: 'mm' },
+              { name: 'Global Z', value: round3(center.z), unit: 'mm' },
+              { name: 'Bounding Box Length', value: round3(size.x), unit: 'mm' },
+              { name: 'Bounding Box Width', value: round3(size.y), unit: 'mm' },
+              { name: 'Bounding Box Height', value: round3(size.z), unit: 'mm' },
+            ];
+
+            const locationProps = [
+              { name: 'Top Elevation', value: round3(box.max.z), unit: 'mm' },
+              { name: 'Bottom Elevation', value: round3(box.min.z), unit: 'mm' },
+              { name: 'Global Top Elevation', value: round3(box.max.z), unit: 'mm' },
+              { name: 'Global Bottom Elevation', value: round3(box.min.z), unit: 'mm' },
+            ];
+
+            // 1. Gộp locationProps vào nhóm Location hiện có (nếu có), hoặc tạo mới
+            let locGroup = propertySets.find(p => p.name.includes('Location') || p.name.includes('📍'));
+            if (!locGroup) {
+              locGroup = { name: '📍 Location', properties: [] };
+              propertySets.push(locGroup);
+            }
+            
+            // BIMVision hiển thị: Project, Building, Storey, Elevations...
+            // Chúng ta chèn Project và Building lên đầu danh sách Location
+            const finalLocProps: { name: string; value: string; unit?: string }[] = [];
+            finalLocProps.push({ name: 'Project', value: projectName || modelId });
+            if (buildingName) {
+              finalLocProps.push({ name: 'Building', value: buildingName });
+            }
+            
+            // Giữ lại các thuộc tính cũ của Location (ví dụ Storey, Elevation tầng)
+            if (locGroup.properties.length > 0) {
+              // Lọc bỏ trùng lặp nếu trong properties cũ đã có Project/Building
+              const oldProps = locGroup.properties.filter(op => op.name !== 'Project' && op.name !== 'Building');
+              finalLocProps.push(...oldProps);
+            }
+            
+            // Thêm các thuộc tính Elevations tính toán của BIMVision
+            finalLocProps.push(...locationProps);
+            
+            locGroup.properties = finalLocProps;
+
+            // 2. Thêm nhóm Geometry
+            propertySets.push({ name: '📐 Geometry', properties: geometryProps });
+
+            // 3. Trích xuất Layer từ dữ liệu liên kết nếu có và thêm vào nhóm Membership
+            const layerVal = unwrap(itemData.PresentationLayer) || 
+                             unwrap(itemData.Layer) || 
+                             (Array.isArray(itemData.PresentationLayers) && itemData.PresentationLayers[0] ? unwrap(itemData.PresentationLayers[0].Name) : null);
+            if (layerVal) {
+              propertySets.push({
+                name: '👥 Membership',
+                properties: [{ name: 'Layer', value: String(layerVal) }]
+              });
+            }
+          }
+        } catch (bboxErr) {
+          console.warn('[BBox Calc] Failed to compute geometry metrics:', bboxErr);
+        }
+      }
+
+      // In thêm bảng thuộc tính đã được parser gom nhóm để dễ đối chiếu
+      console.groupCollapsed(`📋 Các nhóm thuộc tính đã Parse (${propertySets.length})`);
+      propertySets.forEach(pset => {
+        console.group(`Nhóm: ${pset.name}`);
+        console.table(pset.properties);
+        console.groupEnd();
+      });
+      console.groupEnd();
     }
   } catch (err) {
     console.warn('[Props] getItemsData failed:', err);
   }
 
   if (Object.keys(attributes).length > 0) {
-    const props = Object.entries(attributes)
+    const props: { name: string; value: string; unit?: string }[] = Object.entries(attributes)
       .filter(([k]) => !k.startsWith('_'))
-      .map(([n, v]) => ({ name: n, value: String(v) }));
+      .map(([n, v]) => {
+        let unit: string | undefined = undefined;
+        if (n === 'Elevation') unit = 'mm';
+        return { name: n, value: String(v), unit };
+      });
+
+    // 1. Thêm Guid (lấy từ GlobalId hoặc GlobalID)
+    const guidVal = attributes.GlobalId || attributes.GlobalID || attributes._guid;
+    if (guidVal && !props.some(p => p.name === 'Guid')) {
+      props.push({ name: 'Guid', value: String(guidVal) });
+    }
+
+    // 2. Thêm IfcEntity (lấy từ _category hoặc type)
+    const entityVal = attributes._category || attributes._type || attributes.type;
+    if (entityVal && !props.some(p => p.name === 'IfcEntity')) {
+      props.push({ name: 'IfcEntity', value: formatIfcEntityName(String(entityVal)) });
+    }
+
+    // 3. Sắp xếp lại theo đúng thứ tự BIMVision
+    props.sort((a, b) => {
+      const order = ['Guid', 'IfcEntity', 'Name', 'ObjectType', 'PredefinedType', 'Tag'];
+      const idxA = order.indexOf(a.name);
+      const idxB = order.indexOf(b.name);
+      if (idxA !== -1 && idxB !== -1) return idxA - idxB;
+      if (idxA !== -1) return -1;
+      if (idxB !== -1) return 1;
+      return a.name.localeCompare(b.name);
+    });
+
     if (props.length > 0) propertySets.unshift({ name: 'Element Specific', properties: props });
   }
   return { modelId, localId, attributes, propertySets };
+}
+
+function formatIfcEntityName(rawName: string): string {
+  let entity = rawName.toUpperCase();
+  if (!entity.startsWith('IFC')) {
+    entity = 'IFC' + entity;
+  }
+  const mapping: Record<string, string> = {
+    'IFCBUILDINGELEMENTPROXY': 'IfcBuildingElementProxy',
+    'IFCWALLSTANDARDCASE': 'IfcWallStandardCase',
+    'IFCWALL': 'IfcWall',
+    'IFCSLAB': 'IfcSlab',
+    'IFCBEAM': 'IfcBeam',
+    'IFCCOLUMN': 'IfcColumn',
+    'IFCFOOTING': 'IfcFooting',
+    'IFCPILE': 'IfcPile',
+    'IFCMEMBER': 'IfcMember',
+    'IFCPLATE': 'IfcPlate',
+    'IFCRAILING': 'IfcRailing',
+    'IFCSYSTEM': 'IfcSystem',
+    'IFCZONE': 'IfcZone',
+    'IFCGROUP': 'IfcGroup',
+    'IFCDOOR': 'IfcDoor',
+    'IFCWINDOW': 'IfcWindow',
+    'IFCDISTRIBUTIONELEMENT': 'IfcDistributionElement',
+    'IFCFLOWTERMINAL': 'IfcFlowTerminal',
+    'IFCBUILDINGSTOREY': 'IfcBuildingStorey',
+    'IFCBUILDING': 'IfcBuilding',
+    'IFCSITE': 'IfcSite',
+    'IFCPROJECT': 'IfcProject',
+  };
+  if (mapping[entity]) return mapping[entity];
+  let word = entity.slice(3).toLowerCase();
+  const subWords = [
+    'standard', 'case', 'element', 'proxy', 'storey', 'building', 'distribution', 'port',
+    'fitting', 'segment', 'terminal', 'control', 'treatment', 'chamber', 'harness',
+    'compressor', 'condenser', 'evaporator', 'burner', 'boiler', 'chiller', 'coil',
+    'fan', 'pump', 'valve', 'damper', 'actuator', 'sensor', 'controller', 'alarm',
+    'tank', 'filter', 'interceptor', 'electric', 'generator', 'motor', 'transformer',
+    'junction', 'protector', 'cable', 'conductor', 'lamp', 'outlet', 'switch',
+    'light', 'fixture', 'communication', 'appliance', 'audio', 'video',
+    'transport', 'elevator', 'escalator', 'moving', 'walkway', 'furnishing',
+    'system', 'furniture', 'common', 'shared', 'property', 'quantity', 'geometry',
+    'structural', 'member', 'connection', 'point', 'curve', 'surface', 'solid',
+    'representation', 'placement', 'coordinate', 'reference', 'classification',
+    'material', 'layer', 'constituent', 'profile', 'arbitrary', 'derived', 'composite'
+  ];
+  let formatted = 'Ifc';
+  let temp = word;
+  while (temp.length > 0) {
+    let matched = false;
+    for (const sub of subWords) {
+      if (temp.startsWith(sub)) {
+        formatted += sub.charAt(0).toUpperCase() + sub.slice(1);
+        temp = temp.slice(sub.length);
+        matched = true;
+        break;
+      }
+    }
+    if (!matched) {
+      formatted += temp.charAt(0).toUpperCase() + temp.slice(1);
+      break;
+    }
+  }
+  return formatted;
+}
+
+interface ProjectUnits {
+  length: string;
+  area: string;
+  volume: string;
+}
+
+function parseUnitEntity(unitEntity: any, model?: any): string | undefined {
+  if (!unitEntity) return undefined;
+  
+  const typeName = String(unwrap(unitEntity._category) || unwrap(unitEntity.type) || '').toUpperCase();
+  
+  if (typeName.includes('SIUNIT')) {
+    const name = String(unwrap(unitEntity.Name) || '').toUpperCase().replace(/\./g, '');
+    const prefix = String(unwrap(unitEntity.Prefix) || '').toUpperCase().replace(/\./g, '');
+    
+    if (name === 'METRE') {
+      if (prefix === 'MILLI') return 'mm';
+      if (prefix === 'CENTI') return 'cm';
+      if (prefix === 'DECI') return 'dm';
+      return 'm';
+    }
+    if (name === 'SQUARE_METRE') return 'm2';
+    if (name === 'CUBIC_METRE') return 'm3';
+    if (name === 'GRAM' || name === 'KILOGRAM') return 'kg';
+    if (name === 'SECOND') return 's';
+    if (name === 'RADIAN') return 'rad';
+    if (name === 'NEWTON') return 'N';
+    if (name === 'PASCAL') return 'Pa';
+    
+    return (prefix && prefix !== 'NONE' ? prefix.toLowerCase() : '') + name.toLowerCase();
+  }
+  
+  if (typeName.includes('CONVERSIONBASEDUNIT')) {
+    const name = unwrap(unitEntity.Name);
+    if (name) return String(name);
+  }
+  
+  return undefined;
+}
+
+function getProjectUnits(model: any): ProjectUnits {
+  const units: ProjectUnits = { length: 'mm', area: 'm2', volume: 'm3' };
+  if (!model || !model.properties) return units;
+  
+  let unitAssignment: any = null;
+  for (const entity of Object.values(model.properties) as any[]) {
+    const category = String(entity._category || entity.type || '').toUpperCase();
+    if (category === 'IFCUNITASSIGNMENT') {
+      unitAssignment = entity;
+      break;
+    }
+  }
+  
+  if (unitAssignment && Array.isArray(unitAssignment.Units)) {
+    for (const unitRef of unitAssignment.Units) {
+      const unitId = unwrap(unitRef);
+      if (!unitId) continue;
+      
+      const unitEntity = model.properties[unitId];
+      if (!unitEntity) continue;
+      
+      const unitType = String(unwrap(unitEntity.UnitType) || '').toUpperCase().replace(/\./g, '');
+      const parsed = parseUnitEntity(unitEntity, model);
+      if (parsed) {
+        if (unitType === 'LENGTHUNIT') {
+          units.length = parsed;
+        } else if (unitType === 'AREAUNIT') {
+          units.area = parsed;
+        } else if (unitType === 'VOLUMEUNIT') {
+          units.volume = parsed;
+        }
+      }
+    }
+  }
+  return units;
+}
+
+function getUnitOfProperty(prop: any, name: string, projectUnits?: ProjectUnits, model?: any): string | undefined {
+  const directUnit = unwrap(prop.Unit);
+  if (directUnit) {
+    if (typeof directUnit === 'number' && model && model.properties) {
+      const unitEntity = model.properties[directUnit];
+      if (unitEntity) {
+        const parsed = parseUnitEntity(unitEntity, model);
+        if (parsed) return parsed;
+      }
+    } else if (typeof directUnit === 'object') {
+      const parsed = parseUnitEntity(directUnit, model);
+      if (parsed) return parsed;
+    }
+  }
+  
+  const nomVal = prop.NominalValue;
+  if (nomVal && typeof nomVal === 'object') {
+    const typeLabel = String(nomVal.label || nomVal.type || '').toUpperCase();
+    if (typeLabel.includes('LENGTH') || typeLabel.includes('LINEAR')) {
+      return projectUnits?.length ?? 'mm';
+    }
+    if (typeLabel.includes('AREA')) {
+      return projectUnits?.area ?? 'm2';
+    }
+    if (typeLabel.includes('VOLUME')) {
+      return projectUnits?.volume ?? 'm3';
+    }
+  }
+  
+  const cleanName = name.toLowerCase().trim();
+  
+  if (cleanName.includes('volume') || cleanName.includes('thể tích') || cleanName.includes('the tich') || 
+      cleanName.includes('khối lượng') || cleanName.includes('khoi luong') || cleanName.includes('khoiluong')) {
+    return projectUnits?.volume ?? 'm3';
+  }
+  
+  if (cleanName.includes('area') || cleanName.includes('diện tích') || cleanName.includes('dien tich') || cleanName.includes('dientich')) {
+    return projectUnits?.area ?? 'm2';
+  }
+  
+  if (cleanName.includes('width') || cleanName.includes('height') || cleanName.includes('length') || 
+      cleanName.includes('thickness') || cleanName.includes('depth') || cleanName.includes('radius') || 
+      cleanName.includes('elevation') || cleanName.includes('offset') || cleanName.includes('size') ||
+      cleanName.includes('cao độ') || cleanName.includes('cao do') || cleanName.includes('kích thước') || cleanName.includes('kich thuoc') ||
+      /^tru_/i.test(cleanName) || 
+      /^be_/i.test(cleanName) || 
+      /^a\d+/i.test(cleanName) || 
+      /_h$/i.test(cleanName) || /_w$/i.test(cleanName) || /_l$/i.test(cleanName) || /_d$/i.test(cleanName) || /_r$/i.test(cleanName)
+  ) {
+    const val = Number(unwrap(prop.NominalValue) ?? unwrap(prop.Value) ?? 0);
+    if (Math.abs(val) > 1 || val === 0 || isNaN(val)) {
+      return projectUnits?.length ?? 'mm';
+    }
+  }
+  
+  return undefined;
 }
 
 function unwrap(val: any): any {
@@ -511,11 +883,15 @@ function unwrap(val: any): any {
   return null;
 }
 
-function addUnwrapped(props: { name: string; value: string }[], obj: any, keys: string[]) {
+function addUnwrapped(props: { name: string; value: string; unit?: string }[], obj: any, keys: string[]) {
   for (const k of keys) {
     const v = unwrap(obj[k]);
     if (v !== null && v !== undefined && v !== '') {
-      props.push({ name: k, value: String(v) });
+      let unit: string | undefined = undefined;
+      if (['OverallWidth', 'OverallDepth', 'WebThickness', 'FlangeThickness', 'FilletRadius', 'Width', 'Depth', 'Radius', 'Thickness', 'Elevation'].includes(k)) {
+        unit = 'mm';
+      }
+      props.push({ name: k, value: String(v), unit });
     }
   }
 }
@@ -524,6 +900,8 @@ function parseItemDataToSections(
   data: Record<string, any>,
   attributes: Record<string, any>,
   propertySets: PropertySet[],
+  projectUnits?: ProjectUnits,
+  model?: any,
 ) {
   if (!data || typeof data !== 'object') return;
 
@@ -543,7 +921,7 @@ function parseItemDataToSections(
       if (!assoc || typeof assoc !== 'object') continue;
       const cat = unwrap(assoc._category);
       if (cat === 'IFCMATERIAL' || cat === 'IFCMATERIALLAYERSETUSAGE' || cat === 'IFCMATERIALLAYERSET' || cat === 'IFCMATERIALCONSTITUENTSET') {
-        const materialProps: { name: string; value: string }[] = [];
+        const materialProps: { name: string; value: string; unit?: string }[] = [];
         const matName = unwrap(assoc.Name);
         if (matName) materialProps.push({ name: 'Name', value: matName });
         const matDesc = unwrap(assoc.Description);
@@ -559,7 +937,7 @@ function parseItemDataToSections(
             const layerName = unwrap(layer.Name) || unwrap(layer.Material?.Name) || `Layer ${i + 1}`;
             const thickness = unwrap(layer.LayerThickness);
             if (layerName) materialProps.push({ name: `Layer[${i}]`, value: layerName });
-            if (thickness) materialProps.push({ name: `Layer[${i}].Thickness`, value: String(thickness) });
+            if (thickness) materialProps.push({ name: `Layer[${i}].Thickness`, value: String(thickness), unit: 'mm' });
           }
         }
         if (Array.isArray(assoc.MaterialConstituents)) {
@@ -575,7 +953,7 @@ function parseItemDataToSections(
           propertySets.push({ name: '🧱 Material', properties: materialProps });
         }
       } else if (cat === 'IFCCLASSIFICATIONREFERENCE' || cat === 'IFCCLASSIFICATION') {
-        const classProps: { name: string; value: string }[] = [];
+        const classProps: { name: string; value: string; unit?: string }[] = [];
         addUnwrapped(classProps, assoc, ['Name', 'Description', 'ItemReference', 'Location', 'Identification']);
         if (classProps.length > 0) {
           propertySets.push({ name: '🏷️ Classification', properties: classProps });
@@ -597,16 +975,15 @@ function parseItemDataToSections(
       else if (relCat === 'IFCPROPERTYSET') displayName = `📋 ${relName}`;
       else if (relCat === 'IFCELEMENTQUANTITY') displayName = `📐 ${relName}`;
 
-      const psetProps: { name: string; value: string }[] = [];
+      const psetProps: { name: string; value: string; unit?: string }[] = [];
 
       if (Array.isArray(rel.HasProperties)) {
         for (const prop of rel.HasProperties) {
           if (!prop || typeof prop !== 'object') continue;
           const propName = unwrap(prop.Name) || 'Unknown';
           const propValue = unwrap(prop.NominalValue) ?? unwrap(prop.Value) ?? '';
-          const unit = unwrap(prop.Unit);
-          const valStr = unit ? `${propValue} ${unit}` : String(propValue);
-          psetProps.push({ name: propName, value: valStr });
+          const unit = getUnitOfProperty(prop, propName, projectUnits, model);
+          psetProps.push({ name: propName, value: String(propValue), unit });
         }
       }
 
@@ -620,10 +997,10 @@ function parseItemDataToSections(
           const qCat = unwrap(q._category) || '';
           let unit = '';
           if (qCat.includes('LENGTH')) unit = 'mm';
-          else if (qCat.includes('AREA')) unit = 'm²';
-          else if (qCat.includes('VOLUME')) unit = 'm³';
+          else if (qCat.includes('AREA')) unit = 'm2';
+          else if (qCat.includes('VOLUME')) unit = 'm3';
           else if (qCat.includes('WEIGHT')) unit = 'kg';
-          psetProps.push({ name: qName, value: unit ? `${qVal} ${unit}` : String(qVal) });
+          psetProps.push({ name: qName, value: String(qVal), unit: unit || undefined });
         }
       }
 
@@ -662,7 +1039,7 @@ function parseItemDataToSections(
 
   const containedIn = data.ContainedInStructure;
   if (Array.isArray(containedIn)) {
-    const locProps: { name: string; value: string }[] = [];
+    const locProps: { name: string; value: string; unit?: string }[] = [];
     for (const struct of containedIn) {
       if (!struct || typeof struct !== 'object') continue;
       const structCat = unwrap(struct._category) || '';
@@ -670,7 +1047,9 @@ function parseItemDataToSections(
       if (structCat.includes('STOREY')) {
         locProps.push({ name: 'Storey', value: structName });
         const elevation = unwrap(struct.Elevation);
-        if (elevation !== null && elevation !== undefined) locProps.push({ name: 'Elevation', value: `${elevation} mm` });
+        if (elevation !== null && elevation !== undefined) {
+          locProps.push({ name: 'Elevation', value: String(elevation), unit: 'mm' });
+        }
       } else if (structCat.includes('BUILDING')) {
         locProps.push({ name: 'Building', value: structName });
       } else if (structCat.includes('SITE')) {
@@ -688,7 +1067,7 @@ function parseItemDataToSections(
   if (Array.isArray(typedBy)) {
     for (const typeRel of typedBy) {
       if (!typeRel || typeof typeRel !== 'object') continue;
-      const typeProps: { name: string; value: string }[] = [];
+      const typeProps: { name: string; value: string; unit?: string }[] = [];
       addUnwrapped(typeProps, typeRel, ['Name', 'Description', 'Tag', 'ElementType', 'PredefinedType']);
       const typeCat = unwrap(typeRel._category);
       if (typeCat) typeProps.push({ name: 'TypeCategory', value: typeCat.replace('IFC', '') });
