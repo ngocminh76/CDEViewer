@@ -125,15 +125,6 @@ canvas {
 .ant-tree-node-content-wrapper {
   background: transparent !important;
   padding: 0 4px !important;
-  display: flex !important;
-  align-items: center;
-  flex: 1;
-  min-width: 0;
-}
-
-.ant-tree-node-content-wrapper .ant-tree-title {
-  flex: 1;
-  min-width: 0;
 }
 
 .ant-tree-node-content-wrapper.ant-tree-node-selected {
@@ -192,5 +183,10 @@ canvas {
 .ant-tree-show-line {
   scrollbar-width: thin;
   scrollbar-color: #2d3748 transparent;
+}
+
+/* Reduced indentation spacer width for compact spatial structure representation */
+.ant-tree-indent-unit {
+  width: 12px !important;
 }
 

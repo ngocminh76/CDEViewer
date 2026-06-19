@@ -68,6 +68,7 @@ export default function BimLayout() {
   const [rightCollapsed, setRightCollapsed] = useState(false);
   const [rightWidth, setRightWidth] = useState(360); // Resizable right panel width
   const [leftCollapsed, setLeftCollapsed] = useState(false);
+  const [leftWidth, setLeftWidth] = useState(300);   // Resizable left panel width
   const [treeData, setTreeData] = useState<TreeNodeData[]>([]);
 
   const [status, setStatus] = useState('Initializing...');
@@ -507,13 +508,51 @@ export default function BimLayout() {
         <Layout style={{ flex: 1 }}>
           {/* Left - Model Tree */}
           <Sider
-            width={280}
+            width={leftWidth}
             collapsible
             collapsed={leftCollapsed}
             collapsedWidth={0}
             trigger={null}
-            style={{ background: '#1f1f1f', borderRight: '1px solid #303030', overflow: 'auto' }}
+            style={{ background: '#1f1f1f', borderRight: '1px solid #303030', overflow: 'hidden', position: 'relative' }}
           >
+            {/* Drag handle for left panel */}
+            {!leftCollapsed && (
+              <div
+                style={{
+                  width: '6px',
+                  cursor: 'col-resize',
+                  position: 'absolute',
+                  right: 0,
+                  top: 0,
+                  bottom: 0,
+                  zIndex: 100,
+                  background: 'rgba(255, 255, 255, 0.05)',
+                  transition: 'background 0.2s',
+                }}
+                onMouseOver={(e) => e.currentTarget.style.background = '#1890ff'}
+                onMouseOut={(e) => e.currentTarget.style.background = 'rgba(255, 255, 255, 0.05)'}
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  const startX = e.clientX;
+                  const startWidth = leftWidth;
+                  
+                  const handleMouseMove = (moveEvent: MouseEvent) => {
+                    const newWidth = startWidth + (moveEvent.clientX - startX);
+                    if (newWidth >= 240 && newWidth <= 600) {
+                      setLeftWidth(newWidth);
+                    }
+                  };
+                  
+                  const handleMouseUp = () => {
+                    document.removeEventListener('mousemove', handleMouseMove);
+                    document.removeEventListener('mouseup', handleMouseUp);
+                  };
+                  
+                  document.addEventListener('mousemove', handleMouseMove);
+                  document.addEventListener('mouseup', handleMouseUp);
+                }}
+              />
+            )}
             {!leftCollapsed && (
               <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
                 <div style={{ padding: '12px 12px 8px', borderBottom: '1px solid #303030', color: '#fff', fontWeight: 600 }}>

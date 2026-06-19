@@ -43,7 +43,7 @@ const renderTitle = (node: TreeNodeData) => {
   else if (category.includes('Proxy') || category.includes('Element')) tagColor = 'purple';
   
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 4, overflow: 'hidden', maxWidth: '100%' }}>
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, verticalAlign: 'middle', maxWidth: '100%' }}>
       {category && (
         <Tag 
           bordered={false} 
@@ -70,7 +70,7 @@ const renderTitle = (node: TreeNodeData) => {
       }}>
         {name || (node.localId !== undefined ? `#${node.localId}` : node.title)}
       </span>
-    </div>
+    </span>
   );
 };
 
