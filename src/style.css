@@ -105,3 +105,92 @@ canvas {
   padding: 6px 12px !important;
 }
 
+/* Custom tree styling matching premium CAD tools */
+.ant-tree {
+  background: transparent !important;
+  color: #cbd5e0 !important;
+}
+
+.ant-tree-treenode {
+  padding: 3px 0 !important;
+  transition: background-color 0.2s;
+  border-radius: 4px;
+  width: 100%;
+}
+
+.ant-tree-treenode:hover {
+  background-color: rgba(255, 255, 255, 0.04) !important;
+}
+
+.ant-tree-node-content-wrapper {
+  background: transparent !important;
+  padding: 0 4px !important;
+  display: flex !important;
+  align-items: center;
+  flex: 1;
+  min-width: 0;
+}
+
+.ant-tree-node-content-wrapper .ant-tree-title {
+  flex: 1;
+  min-width: 0;
+}
+
+.ant-tree-node-content-wrapper.ant-tree-node-selected {
+  background-color: rgba(24, 144, 255, 0.15) !important;
+  border-left: 2px solid #1890ff;
+  border-radius: 0 4px 4px 0;
+}
+
+.ant-tree-switcher {
+  background: transparent !important;
+  color: #718096 !important;
+  display: flex !important;
+  align-items: center;
+  justify-content: center;
+}
+
+.ant-tree-checkbox .ant-tree-checkbox-inner {
+  background-color: #2d3748 !important;
+  border-color: #4a5568 !important;
+}
+
+.ant-tree-checkbox-checked .ant-tree-checkbox-inner {
+  background-color: #1890ff !important;
+  border-color: #1890ff !important;
+}
+
+.ant-tree-checkbox-indeterminate .ant-tree-checkbox-inner::after {
+  background-color: #1890ff !important;
+}
+
+/* Custom search bar styling */
+.ant-input-search .ant-input {
+  background-color: #1a1a29 !important;
+  border-color: #2d3748 !important;
+  color: #fff !important;
+}
+
+.ant-input-search .ant-input:hover,
+.ant-input-search .ant-input:focus {
+  border-color: #1890ff !important;
+}
+
+.ant-input-search .ant-input-search-button {
+  background-color: #2d3748 !important;
+  border-color: #2d3748 !important;
+  color: #cbd5e0 !important;
+}
+
+.ant-input-search .ant-input-search-button:hover {
+  background-color: #1890ff !important;
+  border-color: #1890ff !important;
+  color: #fff !important;
+}
+
+/* Custom scrollbar for directory tree */
+.ant-tree-show-line {
+  scrollbar-width: thin;
+  scrollbar-color: #2d3748 transparent;
+}
+

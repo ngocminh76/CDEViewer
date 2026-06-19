@@ -30,6 +30,8 @@ export interface TreeNodeData {
   modelIdMap?: Record<string, Set<number>>;
   modelId?: string;
   localId?: number;
+  rawCategory?: string;
+  rawName?: string;
 }
 
 export type ToolMode = 'select' | 'clip' | 'none';
@@ -508,6 +510,8 @@ function buildSpatialNode(
     modelIdMap: Object.keys(modelIdMap).length > 0 ? modelIdMap : undefined,
     modelId,
     localId: localId !== null ? localId : undefined,
+    rawCategory: formattedCategory,
+    rawName: name,
   };
 }
 

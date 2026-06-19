@@ -30,6 +30,50 @@ function getIcon(icon?: string) {
   }
 }
 
+const renderTitle = (node: TreeNodeData) => {
+  const isLeaf = !node.children;
+  const category = node.rawCategory || '';
+  const name = node.rawName || '';
+  
+  let tagColor = 'default';
+  if (category.includes('Project')) tagColor = 'blue';
+  else if (category.includes('Site')) tagColor = 'cyan';
+  else if (category.includes('Building') && !category.includes('Storey')) tagColor = 'gold';
+  else if (category.includes('Storey')) tagColor = 'orange';
+  else if (category.includes('Proxy') || category.includes('Element')) tagColor = 'purple';
+  
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 4, overflow: 'hidden', maxWidth: '100%' }}>
+      {category && (
+        <Tag 
+          bordered={false} 
+          color={tagColor} 
+          style={{ 
+            fontSize: '9px', 
+            lineHeight: '14px', 
+            height: '14px', 
+            padding: '0 4px', 
+            margin: 0,
+            textTransform: 'uppercase'
+          }}
+        >
+          {category.replace('Ifc', '')}
+        </Tag>
+      )}
+      <span style={{ 
+        fontSize: '11px', 
+        color: isLeaf ? '#e2e8f0' : '#cbd5e0', 
+        fontWeight: isLeaf ? 500 : 600,
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
+        whiteSpace: 'nowrap',
+      }}>
+        {name || (node.localId !== undefined ? `#${node.localId}` : node.title)}
+      </span>
+    </div>
+  );
+};
+
 function toAntdTreeData(nodes: TreeNodeData[], filter: string): TreeProps['treeData'] {
   const lowerFilter = filter.toLowerCase();
   return nodes
@@ -38,7 +82,7 @@ function toAntdTreeData(nodes: TreeNodeData[], filter: string): TreeProps['treeD
       const titleMatches = node.title.toLowerCase().includes(lowerFilter);
       const hasMatchingChildren = children && children.length > 0;
       if (!titleMatches && !hasMatchingChildren && lowerFilter) return null;
-      return { key: node.key, title: node.title, icon: getIcon(node.icon), children };
+      return { key: node.key, title: renderTitle(node), icon: getIcon(node.icon), children };
     })
     .filter(Boolean) as TreeProps['treeData'];
 }
@@ -196,7 +240,19 @@ export default function ModelTree({
         {checkedKeys.length > 0 && <Tag color="blue">{checkedKeys.length} checked</Tag>}
       </Space>
       <div style={{ flex: 1, overflow: 'auto' }}>
-        <Tree showIcon checkable expandedKeys={expandedKeys} onExpand={(keys) => setExpandedKeys(keys as string[])} selectedKeys={selectedKeys} checkedKeys={checkedKeys} onSelect={handleSelect} onCheck={handleCheck} treeData={antdTreeData} style={{ fontSize: 12 }} />
+        <Tree 
+          showIcon 
+          checkable 
+          showLine={{ showLeafIcon: false }} 
+          expandedKeys={expandedKeys} 
+          onExpand={(keys) => setExpandedKeys(keys as string[])} 
+          selectedKeys={selectedKeys} 
+          checkedKeys={checkedKeys} 
+          onSelect={handleSelect} 
+          onCheck={handleCheck} 
+          treeData={antdTreeData} 
+          style={{ fontSize: 12 }} 
+        />
       </div>
     </div>
   );
