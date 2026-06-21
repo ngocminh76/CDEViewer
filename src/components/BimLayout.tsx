@@ -255,7 +255,7 @@ export default function BimLayout() {
               
               // Nếu mô hình được căn tâm, gốc Three.js sẽ là (0,0,0). Nếu không, nó là [east, height, -north].
               const mOrigin = isCentered ? [0, 0, 0] : [east, height, -north];
-              engine.updateMapboxGISParameters([lng, lat], height, mapboxHeadingRef.current, mOrigin as [number,number,number]);
+              engine.updateMapboxGISParameters([lng, lat], height, mapboxHeadingRef.current, mOrigin as [number,number,number], true);
               foundGeoreference = true;
             }
           }
@@ -285,7 +285,7 @@ export default function BimLayout() {
               setMapboxCenter([lng, lat]);
               setMapboxElevation(pos.y);
               const mOrigin = isCentered ? [0, 0, 0] : [pos.x, pos.y, pos.z];
-              engine.updateMapboxGISParameters([lng, lat], pos.y, mapboxHeadingRef.current, mOrigin as [number,number,number]);
+              engine.updateMapboxGISParameters([lng, lat], pos.y, mapboxHeadingRef.current, mOrigin as [number,number,number], true);
               foundGeoreference = true;
             }
           } catch (matrixErr) {
@@ -305,7 +305,7 @@ export default function BimLayout() {
           const [lng, lat] = vn2000ToWgs84(absoluteEast, absoluteNorth, kttRef.current, zone3degRef.current);
           setMapboxCenter([lng, lat]);
           setMapboxElevation(bboxCenter.y);
-          engine.updateMapboxGISParameters([lng, lat], bboxCenter.y, mapboxHeadingRef.current, [bboxCenter.x, bboxCenter.y, bboxCenter.z]);
+          engine.updateMapboxGISParameters([lng, lat], bboxCenter.y, mapboxHeadingRef.current, [bboxCenter.x, bboxCenter.y, bboxCenter.z], true);
           foundGeoreference = true;
         }
         
@@ -343,7 +343,7 @@ export default function BimLayout() {
                     setRawY(null);
                     setRawZ(elevationValue);
                     
-                    engine.updateMapboxGISParameters([parsedLng, parsedLat], elevationValue, mapboxHeadingRef.current, [bboxCenter.x, bboxCenter.y, bboxCenter.z]);
+                    engine.updateMapboxGISParameters([parsedLng, parsedLat], elevationValue, mapboxHeadingRef.current, [bboxCenter.x, bboxCenter.y, bboxCenter.z], true);
                     foundGeoreference = true;
                   }
                 }
@@ -467,7 +467,7 @@ export default function BimLayout() {
       setMapboxCenter(nextCenter);
     }
 
-    engine.updateMapboxGISParameters(nextCenter, nextElevation, nextHeading);
+    engine.updateMapboxGISParameters(nextCenter, nextElevation, nextHeading, undefined, true);
   }, [mapboxCenter, mapboxElevation, mapboxHeading, ktt, zone3deg, rawX, rawY, rawZ]);
 
   useEffect(() => {

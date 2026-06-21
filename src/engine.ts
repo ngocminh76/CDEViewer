@@ -396,14 +396,17 @@ export async function createBimEngine(
     center: [number, number],
     elevation: number,
     heading: number,
-    modelOrigin: [number, number, number] = [0, 0, 0],
+    modelOrigin?: [number, number, number],
     flyToCenter = false
   ) {
     console.log(`[CDEViewer DEBUG] updateMapboxGISParameters called: center=${JSON.stringify(center)}, elevation=${elevation}, heading=${heading}, modelOrigin=${JSON.stringify(modelOrigin)}, flyToCenter=${flyToCenter}`);
     mapBoxComponent.coord.center = center;
     mapBoxComponent.coord.elevation = elevation;
     mapBoxComponent.coord.heading = heading;
-    mapBoxComponent.coord.modelOrigin = modelOrigin;
+    if (modelOrigin !== undefined) {
+      mapBoxComponent.coord.modelOrigin = modelOrigin;
+    }
+    console.log(`[CDEViewer DEBUG] Final modelOrigin in coord: ${JSON.stringify(mapBoxComponent.coord.modelOrigin)}`);
     if (mapBoxComponent.map) {
       if (flyToCenter) {
         console.log(`[CDEViewer DEBUG] Flying Mapbox to center: ${JSON.stringify(center)}`);
