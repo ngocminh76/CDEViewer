@@ -203,9 +203,32 @@ export class MapBoxComponent
     const m = new THREE.Matrix4().fromArray(matrix);
     this.camera.projectionMatrix = m.multiply(this.coord.mapCamera);
 
-    // BỎ CẬP NHẬT CULLING MỖI FRAME (ĐỂ TRÁNH CHỚP NHÁY DO THỂ THỨC MÀN CHIẾU MAPBOX KHÔNG TƯƠNG THÍCH):
-    // fragments.core.update() sẽ không được gọi mỗi frame nữa vì ta đã set child.frustumCulled = false.
-    // Việc này cũng tiết kiệm đáng kể CPU tính toán culling không cần thiết.
+    // Đồng bộ camera từ Mapbox sang camera cục bộ (ThreeJS) để cập nhật culling/LOD
+    if (this.map) {
+      const freeCam = this.map.getFreeCameraOptions();
+      const mercatorPos = freeCam.position;
+      if (mercatorPos) {
+        const mercatorVec = new THREE.Vector3(mercatorPos.x, mercatorPos.y, mercatorPos.z);
+        const mapCameraInverse = new THREE.Matrix4().copy(this.coord.mapCamera).invert();
+        const localPos = mercatorVec.applyMatrix4(mapCameraInverse);
+
+        const worlds = this.components.get(OBC.Worlds);
+        const world = worlds.list.values().next().value;
+        if (world && world.camera && world.camera.three) {
+          const localCam = world.camera.three;
+          localCam.position.copy(localPos);
+          localCam.projectionMatrix.copy(this.camera.projectionMatrix);
+          localCam.matrixWorld.identity();
+          localCam.matrixWorldInverse.identity();
+        }
+      }
+    }
+
+    // Cập nhật LOD/culling cho fragments core đồng bộ theo thời gian thực
+    const fragments = this.components.get(OBC.FragmentsManager);
+    if (fragments) {
+      fragments.core.update(true);
+    }
 
     // Debug: log once every 120 frames
     this._debugFrameCount++;

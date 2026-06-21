@@ -29,7 +29,7 @@ export async function setupFragments(
   fragments.list.onItemSet.add(({ value: model }) => {
     const mapBoxComponent = components.get(MapBoxComponent);
     if (mapBoxComponent && mapBoxComponent.enabled) {
-      model.useCamera(mapBoxComponent.camera);
+      model.useCamera(world.camera.three);
       mapBoxComponent.scene.add(model.object);
       console.log(`[Loader DEBUG] Model added to MAPBOX scene.`);
       

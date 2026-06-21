@@ -307,6 +307,17 @@ export async function createBimEngine(
         mapBoxComponent.setup();
       }
       
+      // Stub các hàm cập nhật ma trận của camera cục bộ để tránh bị ghi đè dữ liệu đồng bộ từ Mapbox
+      const cam = world.camera.three as any;
+      if (!cam._origUpdateProjectionMatrix) {
+        cam._origUpdateProjectionMatrix = cam.updateProjectionMatrix;
+      }
+      if (!cam._origUpdateWorldMatrix) {
+        cam._origUpdateWorldMatrix = cam.updateWorldMatrix;
+      }
+      cam.updateProjectionMatrix = () => {};
+      cam.updateWorldMatrix = () => {};
+
       // Di chuyển tất cả fragments/models từ local scene sang Mapbox scene
       for (const group of fragments.list.values()) {
         console.log(`[CDEViewer DEBUG] Moving modelId=${group.modelId} to Mapbox scene.`);
@@ -316,7 +327,7 @@ export async function createBimEngine(
         mapBoxComponent.scene.add(group.object);
         
         // ĐỒNG BỘ CAMERA ĐỂ TRÁNH LỖI CULLING LÀM ẨN MÔ HÌNH:
-        group.useCamera(mapBoxComponent.camera);
+        group.useCamera(world.camera.three);
 
         // Vô hiệu hóa frustum culling của Three.js
         let meshCount = 0;
@@ -360,6 +371,19 @@ export async function createBimEngine(
         world.renderer.enabled = true;
         console.log(`[CDEViewer DEBUG] Enabled local world.renderer.`);
       }
+
+      // Khôi phục các hàm cập nhật camera
+      const cam = world.camera.three as any;
+      if (cam._origUpdateProjectionMatrix) {
+        cam.updateProjectionMatrix = cam._origUpdateProjectionMatrix;
+        delete cam._origUpdateProjectionMatrix;
+      }
+      if (cam._origUpdateWorldMatrix) {
+        cam.updateWorldMatrix = cam._origUpdateWorldMatrix;
+        delete cam._origUpdateWorldMatrix;
+      }
+      cam.updateProjectionMatrix();
+      cam.updateWorldMatrix(true, true);
 
       // Di chuyển tất cả fragments/models quay về local scene
       for (const group of fragments.list.values()) {
