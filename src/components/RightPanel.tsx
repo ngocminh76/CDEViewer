@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Descriptions, Collapse, Table, Tag, Empty, Typography, Card, InputNumber, Button, Select, Radio, Alert, Tabs } from 'antd';
+import { Descriptions, Collapse, Table, Tag, Empty, Typography, Card, InputNumber, Button, Select, Radio, Alert, Tabs, Slider } from 'antd';
 import type { SelectionInfo, PropertySet } from '../engine.ts';
 import { vn2000ToWgs84 } from '../utils/coordination.ts';
 import { VN2000_PROVINCES } from '../utils/vn2000-provinces.ts';
@@ -12,6 +12,8 @@ interface RightPanelProps {
   mapboxCenter: [number, number];
   mapboxElevation: number;
   mapboxHeading: number;
+  mapboxPitch: number;
+  mapboxBearing: number;
   rawX: number | null;
   rawY: number | null;
   rawZ: number | null;
@@ -27,6 +29,8 @@ interface RightPanelProps {
     rawY?: number | null;
     rawZ?: number | null;
   }) => void;
+  onUpdatePitch: (pitch: number) => void;
+  onUpdateBearing: (bearing: number) => void;
 }
 
 export default function RightPanel({
@@ -35,12 +39,16 @@ export default function RightPanel({
   mapboxCenter,
   mapboxElevation,
   mapboxHeading,
+  mapboxPitch,
+  mapboxBearing,
   rawX,
   rawY,
   rawZ,
   ktt,
   zone3deg,
   onUpdateParams,
+  onUpdatePitch,
+  onUpdateBearing,
 }: RightPanelProps) {
   const [lng, setLng] = useState(mapboxCenter[0]);
   const [lat, setLat] = useState(mapboxCenter[1]);
@@ -128,6 +136,56 @@ export default function RightPanel({
       rawZ: localRawZ,
     });
   };
+
+  const handleHeadingChange = (val: number) => {
+    setHeading(val);
+    onUpdateParams({ heading: val });
+  };
+
+  const handleElevationChange = (val: number) => {
+    setElevation(val);
+    onUpdateParams({ elevation: val });
+  };
+
+  const renderMapCameraCard = () => (
+    <Card
+      title="🎥 Điều khiển Camera Bản đồ"
+      size="small"
+      style={{ marginBottom: 12, background: '#1f1f2e', borderColor: '#303050' }}
+    >
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        {/* Pitch (Góc nghiêng) */}
+        <div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 2 }}>
+            <span style={{ fontSize: 11, color: '#aaa' }}>Góc nghiêng camera (Pitch):</span>
+            <span style={{ fontSize: 11, color: '#1890ff', fontWeight: 'bold' }}>{Math.round(mapboxPitch)}°</span>
+          </div>
+          <Slider
+            min={0}
+            max={85}
+            value={mapboxPitch}
+            onChange={(v) => onUpdatePitch(v)}
+            tooltip={{ formatter: (v) => `${v}°` }}
+          />
+        </div>
+
+        {/* Bearing (Hướng xoay) */}
+        <div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 2 }}>
+            <span style={{ fontSize: 11, color: '#aaa' }}>Hướng xoay bản đồ (Bearing):</span>
+            <span style={{ fontSize: 11, color: '#1890ff', fontWeight: 'bold' }}>{Math.round(mapboxBearing)}°</span>
+          </div>
+          <Slider
+            min={0}
+            max={360}
+            value={mapboxBearing}
+            onChange={(v) => onUpdateBearing(v)}
+            tooltip={{ formatter: (v) => `${v}°` }}
+          />
+        </div>
+      </div>
+    </Card>
+  );
 
   const handleKttSelectChange = (val: string) => {
     setSelectedProvince(val);
@@ -265,24 +323,42 @@ export default function RightPanel({
             />
           </Descriptions.Item>
           <Descriptions.Item label="Cao độ (m)">
-            <InputNumber
-              value={elevation}
-              onChange={(v) => v !== null && setElevation(v)}
-              style={{ width: '100%' }}
-              step={0.1}
-              precision={2}
-            />
+            <div style={{ display: 'flex', flexDirection: 'column', width: '100%' }}>
+              <InputNumber
+                value={elevation}
+                onChange={(v) => v !== null && handleElevationChange(v)}
+                style={{ width: '100%', marginBottom: 4 }}
+                step={0.5}
+                precision={2}
+              />
+              <Slider
+                min={-50}
+                max={200}
+                value={elevation}
+                onChange={handleElevationChange}
+                tooltip={{ formatter: (v) => `${v}m` }}
+              />
+            </div>
           </Descriptions.Item>
           <Descriptions.Item label="Góc xoay (°)">
-            <InputNumber
-              value={heading}
-              onChange={(v) => v !== null && setHeading(v)}
-              style={{ width: '100%' }}
-              step={1}
-              min={-180}
-              max={180}
-              precision={1}
-            />
+            <div style={{ display: 'flex', flexDirection: 'column', width: '100%' }}>
+              <InputNumber
+                value={heading}
+                onChange={(v) => v !== null && handleHeadingChange(v)}
+                style={{ width: '100%', marginBottom: 4 }}
+                step={1}
+                min={-180}
+                max={180}
+                precision={1}
+              />
+              <Slider
+                min={-180}
+                max={180}
+                value={heading}
+                onChange={handleHeadingChange}
+                tooltip={{ formatter: (v) => `${v}°` }}
+              />
+            </div>
           </Descriptions.Item>
         </Descriptions>
 
@@ -300,8 +376,9 @@ export default function RightPanel({
   if (!selection) {
     if (mapboxEnabled) {
       return (
-        <div style={{ padding: 12, overflow: 'auto', height: '100%' }}>
+        <div style={{ padding: 12, overflow: 'auto', height: '100%', display: 'flex', flexDirection: 'column', gap: 12 }}>
           {renderGisCard()}
+          {renderMapCameraCard()}
         </div>
       );
     }
@@ -445,6 +522,7 @@ export default function RightPanel({
   return (
     <div style={{ padding: 12, overflow: 'auto', height: '100%', display: 'flex', flexDirection: 'column', gap: 12 }}>
       {mapboxEnabled && renderGisCard()}
+      {mapboxEnabled && renderMapCameraCard()}
 
       <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
         <Tag color="blue" style={{ margin: 0 }}>{modelId}</Tag>

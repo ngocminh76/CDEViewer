@@ -82,6 +82,8 @@ export default function BimLayout() {
   const [mapboxCenter, setMapboxCenter] = useState<[number, number]>([105.804817, 21.028511]);
   const [mapboxElevation, setMapboxElevation] = useState<number>(0);
   const [mapboxHeading, setMapboxHeading] = useState<number>(0);
+  const [mapboxPitch, setMapboxPitch] = useState<number>(60);
+  const [mapboxBearing, setMapboxBearing] = useState<number>(60); // -300 is 60
 
   const [mapboxStyle, setMapboxStyleState] = useState<string>('mapbox://styles/mapbox/streets-v12');
   const [docOpen, setDocOpen] = useState<boolean>(false);
@@ -175,6 +177,13 @@ export default function BimLayout() {
       const canvas = engine.world.renderer!.three.domElement;
       cleanupRef.current = engine.setupSelection(canvas, (info) => {
         setSelection(info);
+      });
+
+      // Lắng nghe sự kiện di chuyển map để cập nhật các thanh trượt Pitch/Bearing trong thời gian thực
+      engine.mapBoxComponent.onMapMove.add(({ pitch, bearing }) => {
+        setMapboxPitch(pitch);
+        const normalizedBearing = (bearing % 360 + 360) % 360;
+        setMapboxBearing(normalizedBearing);
       });
 
       // Track clip changes
@@ -510,6 +519,23 @@ export default function BimLayout() {
     if (engineRef.current) engineRef.current.setCameraView(view);
   }, []);
 
+  // --- Pitch / Bearing updates ---
+  const handleUpdatePitch = useCallback((pitch: number) => {
+    const engine = engineRef.current;
+    if (engine && engine.mapBoxComponent && engine.mapBoxComponent.map) {
+      engine.mapBoxComponent.map.setPitch(pitch);
+      setMapboxPitch(pitch);
+    }
+  }, []);
+
+  const handleUpdateBearing = useCallback((bearing: number) => {
+    const engine = engineRef.current;
+    if (engine && engine.mapBoxComponent && engine.mapBoxComponent.map) {
+      engine.mapBoxComponent.map.setBearing(bearing);
+      setMapboxBearing(bearing);
+    }
+  }, []);
+
   // --- Upload ---
   const handleUpload = useCallback(async (file: File) => {
     const engine = engineRef.current;
@@ -737,6 +763,10 @@ export default function BimLayout() {
                 ktt={ktt}
                 zone3deg={zone3deg}
                 onUpdateParams={handleUpdateParams}
+                mapboxPitch={mapboxPitch}
+                mapboxBearing={mapboxBearing}
+                onUpdatePitch={handleUpdatePitch}
+                onUpdateBearing={handleUpdateBearing}
               />
             )}
           </Sider>

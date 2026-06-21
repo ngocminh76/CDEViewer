@@ -27,6 +27,8 @@ export class MapBoxComponent
 
   readonly onDisposed: OBC.Event<any> = new OBC.Event();
 
+  readonly onMapMove: OBC.Event<{ pitch: number; bearing: number }> = new OBC.Event();
+
   readonly coord = new MapBoxCoord();
 
   isSetup = false;
@@ -63,6 +65,7 @@ export class MapBoxComponent
     this.map?.remove();
     (this.map as any) = null;
     (this.container as any) = null;
+    this.onMapMove.reset();
     this.onDisposed.trigger(this);
     this.onDisposed.reset();
     console.log("disposed MapBoxComponent");
@@ -95,6 +98,14 @@ export class MapBoxComponent
       container: this.container,
       accessToken: token,
       ...this.config,
+    });
+    this.map.on("move", () => {
+      if (this.map) {
+        this.onMapMove.trigger({
+          pitch: this.map.getPitch(),
+          bearing: this.map.getBearing(),
+        });
+      }
     });
     this.map.rotateTo(Math.PI / 2);
     this.addDefaultLayer();

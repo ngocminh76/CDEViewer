@@ -149,6 +149,7 @@ export interface BimEngine {
   dispose: () => void;
 
   // Mapbox
+  mapBoxComponent: MapBoxComponent;
   initMapbox: (container: HTMLDivElement) => void;
   setMapboxEnabled: (enabled: boolean) => void;
   updateMapboxGISParameters: (center: [number, number], elevation: number, heading: number, modelOrigin?: [number, number, number], flyToCenter?: boolean) => void;
@@ -827,7 +828,7 @@ export async function createBimEngine(
     setClipperEnabled, createClip, deleteClip, deleteAllClips, getClipCount,
     zoomToFit, setCameraView,
     setToolMode, getToolMode,
-    initMapbox, setMapboxEnabled, updateMapboxGISParameters, setMapboxStyle,
+    mapBoxComponent, initMapbox, setMapboxEnabled, updateMapboxGISParameters, setMapboxStyle,
   };
 }
 
