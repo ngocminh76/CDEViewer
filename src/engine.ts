@@ -608,6 +608,16 @@ export async function createBimEngine(
    * 4. Nếu quá 6 giây vẫn lỗi, ta bỏ qua (skip zoom) và in cảnh báo chứ không gọi setLookAt để bảo vệ camera khỏi bị đơ.
    */
   async function zoomToFit() {
+    if (mapBoxComponent.enabled && mapBoxComponent.map) {
+      console.log(`[zoomToFit] Mapbox enabled. Flying to center: ${JSON.stringify(mapBoxComponent.coord.center)}`);
+      mapBoxComponent.map.flyTo({
+        center: mapBoxComponent.coord.center,
+        zoom: 18,
+        essential: true
+      });
+      return;
+    }
+
     const modelIds = Array.from(fragments.list.keys()).map((id) => new RegExp(`^${id}$`));
     if (modelIds.length === 0) return;
 
@@ -683,6 +693,46 @@ export async function createBimEngine(
   }
 
   function setCameraView(view: 'top' | 'front' | 'right' | 'left' | 'back' | 'perspective') {
+    if (mapBoxComponent.enabled && mapBoxComponent.map) {
+      let pitch = 60;
+      const bearing = mapBoxComponent.coord.heading || 0;
+      let targetBearing = 0;
+      switch (view) {
+        case 'top':
+          pitch = 0;
+          targetBearing = 0; // Nhìn từ trên xuống, Bắc hướng lên trên
+          break;
+        case 'front':
+          pitch = 80;
+          targetBearing = bearing;
+          break;
+        case 'right':
+          pitch = 80;
+          targetBearing = bearing + 90;
+          break;
+        case 'left':
+          pitch = 80;
+          targetBearing = bearing - 90;
+          break;
+        case 'back':
+          pitch = 80;
+          targetBearing = bearing + 180;
+          break;
+        case 'perspective':
+          pitch = 60;
+          targetBearing = bearing - 45;
+          break;
+      }
+      const normalizedBearing = (targetBearing % 360 + 360) % 360;
+      console.log(`[CDEViewer] Mapbox setCameraView: view=${view}, pitch=${pitch}, bearing=${normalizedBearing}`);
+      mapBoxComponent.map.easeTo({
+        pitch,
+        bearing: normalizedBearing,
+        duration: 1000
+      });
+      return;
+    }
+
     const d = 25;
     const t = { x: 0, y: 3, z: 0 };
     switch (view) {
