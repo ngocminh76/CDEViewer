@@ -239,6 +239,18 @@ export async function createBimEngine(
     model.object.addEventListener('childadded', (event: any) => {
       if (event.child) {
         cacheGeometryArrays(event.child);
+        // Nếu bản đồ đang bật, tắt frustum culling ngay khi cấu kiện con được nạp xong
+        if (mapBoxComponent.enabled) {
+          event.child.traverse((sub: any) => {
+            if ((sub.isMesh || sub.isInstancedMesh) && sub.geometry?.attributes?.position?.array) {
+              sub.frustumCulled = false;
+            }
+          });
+          // Kích hoạt Mapbox vẽ lại cấu kiện mới nạp xong
+          setTimeout(() => {
+            if (mapBoxComponent.map) mapBoxComponent.map.triggerRepaint();
+          }, 50);
+        }
       }
     });
     // Sao lưu bất kỳ meshes nào đã có sẵn

@@ -27,18 +27,32 @@ export async function setupFragments(
   );
 
   fragments.list.onItemSet.add(({ value: model }) => {
-    model.useCamera(world.camera.three);
-
     const mapBoxComponent = components.get(MapBoxComponent);
     if (mapBoxComponent && mapBoxComponent.enabled) {
+      model.useCamera(mapBoxComponent.camera);
       mapBoxComponent.scene.add(model.object);
       console.log(`[Loader DEBUG] Model added to MAPBOX scene.`);
+      
+      // Vô hiệu hóa frustum culling ngay lập tức cho các mesh đã sẵn sàng
+      model.object.traverse((child: any) => {
+        if ((child.isMesh || child.isInstancedMesh) && child.geometry?.attributes?.position?.array) {
+          child.frustumCulled = false;
+        }
+      });
+      
+      // Buộc Mapbox vẽ lại mô hình mới nạp
+      setTimeout(() => {
+        if (mapBoxComponent.map) {
+          mapBoxComponent.map.triggerRepaint();
+        }
+      }, 100);
     } else {
+      model.useCamera(world.camera.three);
       world.scene.three.add(model.object);
       console.log(`[Loader DEBUG] Model added to LOCAL scene.`);
     }
 
-    // Count meshes and fix frustum culling (delayed to allow mesh loading)
+    // Count meshes and log info (delayed to allow mesh loading from worker)
     setTimeout(() => {
       let meshCount = 0;
       let instancedMeshCount = 0;
@@ -47,17 +61,6 @@ export async function setupFragments(
         else if (child.isMesh) meshCount++;
       });
       console.log(`[Loader DEBUG] Model meshes (after 3s): ${meshCount} Mesh + ${instancedMeshCount} InstancedMesh = ${meshCount + instancedMeshCount} total`);
-
-      // If Mapbox is enabled, disable frustum culling for valid meshes
-      const mbComp = components.get(MapBoxComponent);
-      if (mbComp && mbComp.enabled) {
-        model.object.traverse((child: any) => {
-          if ((child.isMesh || child.isInstancedMesh) && child.geometry?.attributes?.position?.array) {
-            child.frustumCulled = false;
-          }
-        });
-        console.log(`[Loader DEBUG] Disabled frustumCulled for Mapbox meshes.`);
-      }
     }, 3000);
 
     fragments.core.update(true);
