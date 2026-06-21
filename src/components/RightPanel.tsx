@@ -164,7 +164,7 @@ export default function RightPanel({
             style={{ fontSize: 11, padding: '4px 8px', marginBottom: 8 }}
           />
         )}
-        
+
         {/* Raw VN-2000 fields */}
         <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
           <div style={{ flex: 1 }}>
@@ -313,20 +313,20 @@ export default function RightPanel({
   // Lọc các nhóm thuộc tính cho các tab tương ứng (giống BIMVision)
   const locationPsets = propertySets.filter(p => p.name.includes('Location') || p.name.includes('📍'));
   const classificationPsets = propertySets.filter(p => p.name.includes('Classification') || p.name.includes('🏷️'));
-  
+
   // Relations: gồm Type (🔧), Material (🧱) và các nhóm liên quan đến ObjectType của cấu kiện
-  const relationPsets = propertySets.filter(p => 
-    p.name.includes('Type') || 
+  const relationPsets = propertySets.filter(p =>
+    p.name.includes('Type') ||
     p.name.includes('🔧') ||
     p.name.includes('Material') ||
     p.name.includes('🧱') ||
     (attributes.ObjectType && p.name.includes(attributes.ObjectType))
   );
-  
+
   // Properties: tất cả các nhóm còn lại
-  const mainPropertiesPsets = propertySets.filter(p => 
-    !locationPsets.includes(p) && 
-    !classificationPsets.includes(p) && 
+  const mainPropertiesPsets = propertySets.filter(p =>
+    !locationPsets.includes(p) &&
+    !classificationPsets.includes(p) &&
     !relationPsets.includes(p)
   );
 
@@ -334,7 +334,7 @@ export default function RightPanel({
   const sortedPropertiesPsets = [...mainPropertiesPsets].sort((a, b) => {
     if (a.name === 'Element Specific') return -1;
     if (b.name === 'Element Specific') return 1;
-    
+
     // Loại bỏ các icon/ký tự đặc biệt ở đầu khi so sánh tên
     const nameA = a.name.replace(/^[📋📐🧱🏷️📍🔧👥]\s*/, '');
     const nameB = b.name.replace(/^[📋📐🧱🏷️📍🔧👥]\s*/, '');
@@ -344,16 +344,16 @@ export default function RightPanel({
   });
 
   const propertyColumns = [
-    { 
-      title: 'Name', 
-      dataIndex: 'name', 
-      key: 'name', 
+    {
+      title: 'Name',
+      dataIndex: 'name',
+      key: 'name',
       width: '50%',
       render: (text: string, record: any) => {
         const isGroup = record.children !== undefined;
         return (
-          <span style={{ 
-            color: isGroup ? '#90cdf4' : '#cbd5e0', 
+          <span style={{
+            color: isGroup ? '#90cdf4' : '#cbd5e0',
             fontSize: 11,
             fontWeight: isGroup ? 600 : 'normal'
           }}>
@@ -362,17 +362,17 @@ export default function RightPanel({
         );
       }
     },
-    { 
-      title: 'Value', 
-      dataIndex: 'value', 
-      key: 'value', 
+    {
+      title: 'Value',
+      dataIndex: 'value',
+      key: 'value',
       width: '35%',
       render: (text: string) => <span style={{ color: '#e2e8f0', fontSize: 11, fontWeight: 500 }}>{text}</span>
     },
-    { 
-      title: 'Unit', 
-      dataIndex: 'unit', 
-      key: 'unit', 
+    {
+      title: 'Unit',
+      dataIndex: 'unit',
+      key: 'unit',
       width: '15%',
       render: (text: string) => text ? <Tag color="default" style={{ fontSize: 9, margin: 0, padding: '0 4px', background: '#2d3748', borderColor: '#4a5568', color: '#cbd5e0' }}>{text}</Tag> : null
     },
@@ -381,10 +381,10 @@ export default function RightPanel({
   const renderPsetTable = (psets: PropertySet[]) => {
     if (psets.length === 0) {
       return (
-        <Empty 
-          image={Empty.PRESENTED_IMAGE_SIMPLE} 
-          description={<span style={{ color: '#718096', fontSize: 11 }}>Không có dữ liệu</span>} 
-          style={{ padding: '20px 0', margin: 0 }} 
+        <Empty
+          image={Empty.PRESENTED_IMAGE_SIMPLE}
+          description={<span style={{ color: '#718096', fontSize: 11 }}>Không có dữ liệu</span>}
+          style={{ padding: '20px 0', margin: 0 }}
         />
       );
     }
@@ -475,10 +475,10 @@ export default function RightPanel({
       </Descriptions>
 
       <div style={{ flex: 1, minHeight: 0 }}>
-        <Tabs 
-          defaultActiveKey="properties" 
-          items={tabItems} 
-          size="small" 
+        <Tabs
+          defaultActiveKey="properties"
+          items={tabItems}
+          size="small"
           style={{ color: '#e2e8f0' }}
           tabBarStyle={{ marginBottom: 8 }}
         />

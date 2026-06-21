@@ -1,90 +1,31 @@
-import { useState, useMemo, useCallback, useEffect } from 'react';
-import { Tree, Input, Space, Button, Tooltip, Tag, Empty } from 'antd';
+/* eslint-disable @typescript-eslint/no-explicit-any */
+import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
+import { Table, Input, Space, Button, Tooltip, Tag, Empty } from 'antd';
 import {
-  ApartmentOutlined,
-  AppstoreOutlined,
-  FolderOutlined,
   EyeOutlined,
   EyeInvisibleOutlined,
   AimOutlined,
   ReloadOutlined,
 } from '@ant-design/icons';
 import type { TreeNodeData, SelectionInfo } from '../engine.ts';
-import type { TreeProps } from 'antd';
 
 const { Search } = Input;
 
-function getIcon(icon?: string) {
-  switch (icon) {
-    case 'building':
-    case 'storey':
-      return <ApartmentOutlined />;
-    case 'category':
-    case 'element':
-      return <AppstoreOutlined />;
-    case 'folder':
-    case 'model':
-      return <FolderOutlined />;
-    default:
-      return <AppstoreOutlined />;
-  }
-}
-
-const renderTitle = (node: TreeNodeData) => {
-  const isLeaf = !node.children;
-  const category = node.rawCategory || '';
-  const name = node.rawName || '';
-  
-  let tagColor = 'default';
-  if (category.includes('Project')) tagColor = 'blue';
-  else if (category.includes('Site')) tagColor = 'cyan';
-  else if (category.includes('Building') && !category.includes('Storey')) tagColor = 'gold';
-  else if (category.includes('Storey')) tagColor = 'orange';
-  else if (category.includes('Proxy') || category.includes('Element')) tagColor = 'purple';
-  
-  return (
-    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, verticalAlign: 'middle', maxWidth: '100%' }}>
-      {category && (
-        <Tag 
-          bordered={false} 
-          color={tagColor} 
-          style={{ 
-            fontSize: '9px', 
-            lineHeight: '14px', 
-            height: '14px', 
-            padding: '0 4px', 
-            margin: 0,
-            textTransform: 'uppercase'
-          }}
-        >
-          {category.replace('Ifc', '')}
-        </Tag>
-      )}
-      <span style={{ 
-        fontSize: '11px', 
-        color: isLeaf ? '#e2e8f0' : '#cbd5e0', 
-        fontWeight: isLeaf ? 500 : 600,
-        overflow: 'hidden',
-        textOverflow: 'ellipsis',
-        whiteSpace: 'nowrap',
-      }}>
-        {name || (node.localId !== undefined ? `#${node.localId}` : node.title)}
-      </span>
-    </span>
-  );
-};
-
-function toAntdTreeData(nodes: TreeNodeData[], filter: string): TreeProps['treeData'] {
+function filterTreeData(nodes: TreeNodeData[], filter: string): TreeNodeData[] {
+  if (!filter) return nodes;
   const lowerFilter = filter.toLowerCase();
   return nodes
     .map((node) => {
-      const children = node.children ? toAntdTreeData(node.children, filter) : undefined;
+      const children = node.children ? filterTreeData(node.children, filter) : undefined;
+      const categoryMatches = (node.rawCategory || '').toLowerCase().includes(lowerFilter);
+      const nameMatches = (node.rawName || '').toLowerCase().includes(lowerFilter);
       const titleMatches = node.title.toLowerCase().includes(lowerFilter);
+      const matches = categoryMatches || nameMatches || titleMatches;
       const hasMatchingChildren = children && children.length > 0;
-      if (!titleMatches && !hasMatchingChildren && lowerFilter) return null;
-      return { key: node.key, title: renderTitle(node), icon: getIcon(node.icon), children };
+      if (!matches && !hasMatchingChildren) return null;
+      return { ...node, children };
     })
-    .filter(Boolean) as TreeProps['treeData'];
+    .filter(Boolean) as TreeNodeData[];
 }
 
 interface ModelTreeProps {
@@ -92,6 +33,7 @@ interface ModelTreeProps {
   onHighlight?: (modelIdMap: Record<string, Set<number>>) => void;
   onClearHighlight?: () => void;
   onHide?: (modelIdMap: Record<string, Set<number>>) => void;
+  onShow?: (modelIdMap: Record<string, Set<number>>) => void; // Added for active checkbox view
   onIsolate?: (modelIdMap: Record<string, Set<number>>) => void;
   onShowAll?: () => void;
   onSelectElement?: (modelId: string, localId: number) => void;
@@ -99,14 +41,14 @@ interface ModelTreeProps {
 }
 
 export default function ModelTree({
-  treeData, onHighlight, onClearHighlight, onHide, onIsolate, onShowAll, onSelectElement, selection,
+  treeData, onHighlight, onClearHighlight, onHide, onShow, onIsolate, onShowAll, onSelectElement, selection,
 }: ModelTreeProps) {
   const [filter, setFilter] = useState('');
   const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
   const [checkedKeys, setCheckedKeys] = useState<string[]>([]);
   const [expandedKeys, setExpandedKeys] = useState<string[]>([]);
 
-  const antdTreeData = useMemo(() => toAntdTreeData(treeData, filter), [treeData, filter]);
+  const filteredData = useMemo(() => filterTreeData(treeData, filter), [treeData, filter]);
 
   const nodeMap = useMemo(() => {
     const map = new Map<string, TreeNodeData>();
@@ -117,12 +59,38 @@ export default function ModelTree({
     return map;
   }, [treeData]);
 
-  // Expand top levels when treeData loads
+  const prevCheckedKeys = useRef<string[]>([]);
+
+  // Expand top levels and check all keys when treeData loads
   useEffect(() => {
     if (treeData.length > 0) {
       setExpandedKeys(treeData.map((n) => n.key));
+      
+      const allKeys: string[] = [];
+      function collectKeys(nodes: TreeNodeData[]) {
+        for (const n of nodes) {
+          allKeys.push(n.key);
+          if (n.children) collectKeys(n.children);
+        }
+      }
+      collectKeys(treeData);
+      prevCheckedKeys.current = allKeys; // Prevent initial onShow trigger
+      setCheckedKeys(allKeys);
     }
   }, [treeData]);
+
+  // Helper to find path to the key
+  function getParentKeys(nodes: TreeNodeData[], targetKey: string, path: string[]): boolean {
+    for (const n of nodes) {
+      if (n.key === targetKey) return true;
+      if (n.children) {
+        path.push(n.key);
+        if (getParentKeys(n.children, targetKey, path)) return true;
+        path.pop();
+      }
+    }
+    return false;
+  }
 
   // Synchronize 3D selection back to tree selection & auto-expand parents
   useEffect(() => {
@@ -144,19 +112,6 @@ export default function ModelTree({
       setSelectedKeys([foundNode.key]);
       
       const newExpandedKeys = new Set(expandedKeys);
-      
-      function getParentKeys(nodes: TreeNodeData[], targetKey: string, path: string[]): boolean {
-        for (const n of nodes) {
-          if (n.key === targetKey) return true;
-          if (n.children) {
-            path.push(n.key);
-            if (getParentKeys(n.children, targetKey, path)) return true;
-            path.pop();
-          }
-        }
-        return false;
-      }
-      
       const path: string[] = [];
       if (getParentKeys(treeData, foundNode.key, path)) {
         for (const pk of path) {
@@ -188,28 +143,55 @@ export default function ModelTree({
     [nodeMap],
   );
 
-  const handleSelect: TreeProps['onSelect'] = (keys) => {
-    setSelectedKeys(keys as string[]);
-    if (keys.length === 0) { 
-      onClearHighlight?.(); 
-      return; 
-    }
-    
-    const key = keys[0] as string;
-    const node = nodeMap.get(key);
-    
-    // Call the callback to select the element when tree node is clicked
-    if (node && node.modelId && node.localId !== undefined) {
-      onSelectElement?.(node.modelId, node.localId);
-    }
-    
-    const map = getNodeModelIdMap(key);
-    if (map) onHighlight?.(map);
-  };
+  // Monitor checkedKeys changes to immediately toggle element visibility
+  useEffect(() => {
+    const added = checkedKeys.filter((k) => !prevCheckedKeys.current.includes(k));
+    const removed = prevCheckedKeys.current.filter((k) => !checkedKeys.includes(k));
 
-  const handleCheck: TreeProps['onCheck'] = (checked) => {
-    const keys = Array.isArray(checked) ? checked : checked.checked;
-    setCheckedKeys(keys as string[]);
+    if (added.length > 0) {
+      const mergedShow: Record<string, Set<number>> = {};
+      for (const key of added) {
+        const map = getNodeModelIdMap(key);
+        if (map) {
+          for (const [mid, ids] of Object.entries(map)) {
+            if (!mergedShow[mid]) mergedShow[mid] = new Set();
+            for (const id of ids) mergedShow[mid].add(id);
+          }
+        }
+      }
+      if (Object.keys(mergedShow).length > 0) {
+        onShow?.(mergedShow);
+      }
+    }
+
+    if (removed.length > 0) {
+      const mergedHide: Record<string, Set<number>> = {};
+      for (const key of removed) {
+        const map = getNodeModelIdMap(key);
+        if (map) {
+          for (const [mid, ids] of Object.entries(map)) {
+            if (!mergedHide[mid]) mergedHide[mid] = new Set();
+            for (const id of ids) mergedHide[mid].add(id);
+          }
+        }
+      }
+      if (Object.keys(mergedHide).length > 0) {
+        onHide?.(mergedHide);
+      }
+    }
+
+    prevCheckedKeys.current = checkedKeys;
+  }, [checkedKeys, getNodeModelIdMap, onShow, onHide]);
+
+  const handleRowClick = (record: TreeNodeData) => {
+    setSelectedKeys([record.key]);
+    
+    if (record.modelId && record.localId !== undefined) {
+      onSelectElement?.(record.modelId, record.localId);
+    }
+    
+    const map = getNodeModelIdMap(record.key);
+    if (map) onHighlight?.(map);
   };
 
   const getCheckedModelIdMap = useCallback((): Record<string, Set<number>> | null => {
@@ -225,6 +207,69 @@ export default function ModelTree({
     return Object.keys(merged).length > 0 ? merged : null;
   }, [checkedKeys, getNodeModelIdMap]);
 
+  const columns = [
+    {
+      title: 'Type',
+      dataIndex: 'rawCategory',
+      key: 'type',
+      width: '35%',
+      render: (text: string, record: TreeNodeData) => {
+        return (
+          <span style={{ 
+            fontSize: '12px', 
+            fontWeight: record.children ? 600 : 400, 
+            color: record.children ? '#cbd5e0' : '#e2e8f0',
+            verticalAlign: 'middle' 
+          }}>
+            {record.rawCategory || ''}
+          </span>
+        );
+      }
+    },
+    {
+      title: 'Name',
+      dataIndex: 'rawName',
+      key: 'name',
+      width: '35%',
+      render: (text: string, record: TreeNodeData) => {
+        const isLeaf = !record.children;
+        return (
+          <span style={{ 
+            fontSize: '11px', 
+            color: isLeaf ? '#e2e8f0' : '#cbd5e0', 
+            fontWeight: isLeaf ? 500 : 600,
+            display: 'block',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+          }}>
+            {record.rawName || (record.localId !== undefined ? `#${record.localId}` : '')}
+          </span>
+        );
+      }
+    },
+    {
+      title: 'Description',
+      dataIndex: 'description',
+      key: 'description',
+      width: '30%',
+      render: (text: string, record: TreeNodeData) => {
+        return (
+          <span style={{ 
+            fontSize: '11px', 
+            color: '#a0aec0',
+            display: 'block',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+          }}>
+            {record.description || ''}
+          </span>
+        );
+      }
+    }
+  ];
+
   if (treeData.length === 0) {
     return <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="No model loaded" style={{ padding: '20px 0' }} />;
   }
@@ -235,23 +280,56 @@ export default function ModelTree({
       <Space size={4} style={{ marginBottom: 8 }} wrap>
         <Tooltip title="Hide checked"><Button size="small" icon={<EyeInvisibleOutlined />} disabled={checkedKeys.length === 0} onClick={() => { const m = getCheckedModelIdMap(); if (m) onHide?.(m); }} /></Tooltip>
         <Tooltip title="Isolate checked"><Button size="small" icon={<AimOutlined />} disabled={checkedKeys.length === 0} onClick={() => { const m = getCheckedModelIdMap(); if (m) onIsolate?.(m); }} /></Tooltip>
-        <Tooltip title="Show all"><Button size="small" icon={<EyeOutlined />} onClick={onShowAll} /></Tooltip>
+        <Tooltip title="Show all">
+          <Button 
+            size="small" 
+            icon={<EyeOutlined />} 
+            onClick={() => {
+              const allKeys: string[] = [];
+              function collectKeys(nodes: TreeNodeData[]) {
+                for (const n of nodes) {
+                  allKeys.push(n.key);
+                  if (n.children) collectKeys(n.children);
+                }
+              }
+              collectKeys(treeData);
+              setCheckedKeys(allKeys);
+              onShowAll?.();
+            }} 
+          />
+        </Tooltip>
         <Tooltip title="Clear highlight"><Button size="small" icon={<ReloadOutlined />} onClick={onClearHighlight} /></Tooltip>
         {checkedKeys.length > 0 && <Tag color="blue">{checkedKeys.length} checked</Tag>}
       </Space>
       <div style={{ flex: 1, overflow: 'auto' }}>
-        <Tree 
-          showIcon 
-          checkable 
-          showLine={{ showLeafIcon: false }} 
-          expandedKeys={expandedKeys} 
-          onExpand={(keys) => setExpandedKeys(keys as string[])} 
-          selectedKeys={selectedKeys} 
-          checkedKeys={checkedKeys} 
-          onSelect={handleSelect} 
-          onCheck={handleCheck} 
-          treeData={antdTreeData} 
-          style={{ fontSize: 12 }} 
+        <Table
+          key={treeData.length > 0 ? treeData[0].key : 'empty'}
+          dataSource={filteredData}
+          columns={columns}
+          size="small"
+          pagination={false}
+          rowSelection={{
+            type: 'checkbox',
+            columnTitle: <span style={{ fontSize: 10, fontWeight: 600, color: '#a0aec0' }}>Active</span>,
+            selectedRowKeys: checkedKeys,
+            onChange: (keys) => setCheckedKeys(keys as string[]),
+            checkStrictly: false,
+          }}
+          expandable={{
+            expandedRowKeys: expandedKeys,
+            onExpandedRowsChange: (keys) => setExpandedKeys(keys as string[]),
+            expandIconColumnIndex: 1,
+          }}
+          bordered
+          rowKey="key"
+          onRow={(record) => ({
+            onClick: (e) => {
+              if ((e.target as HTMLElement).closest('.ant-table-selection-column')) return;
+              handleRowClick(record);
+            },
+          })}
+          rowClassName={(record) => selectedKeys.includes(record.key) ? 'ant-table-row-selected' : ''}
+          className="ifc-structure-table"
         />
       </div>
     </div>

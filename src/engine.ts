@@ -5,6 +5,107 @@ import { CAMERA_POSITION } from './config.ts';
 import { setupFragments, setupIfcLoader } from './loader.ts';
 import { MapBoxComponent } from './components/MapBoxComponent/index.ts';
 
+// BỘ NHỚ ĐỆM ĐỂ KHẮC PHỤC LỖI GIẢI PHÓNG BỘ NHỚ CPU (byteLength of undefined):
+// Do thư viện @thatopen/fragments tối ưu hóa RAM bằng cách xóa sạch mảng dữ liệu CPU
+// (.array = undefined) của mesh sau khi upload thành công lên GPU của Three.js lần đầu,
+// renderer mới (của Mapbox) khi chạy sẽ không có cache WebGL và cố gắng upload lại mảng CPU này,
+// dẫn đến lỗi sập "Cannot read properties of undefined (reading 'byteLength')".
+// Giải pháp:
+// 1. Dùng WeakMap lưu giữ bản sao mảng CPU ngay khi mesh được nạp từ worker.
+// 2. Chặn callback `onUpload` của Three.js bằng hàm rỗng để ngăn chặn việc tự động giải phóng mảng.
+// 3. Khôi phục lại mảng từ cache khi chuyển giao sang renderer Mapbox.
+const geometryArraysCache = new WeakMap<any, any>();
+
+function cacheGeometryArrays(object: THREE.Object3D) {
+  object.traverse((child: any) => {
+    if (child.isMesh || child.isInstancedMesh) {
+      const geom = child.geometry;
+      if (geom) {
+        for (const key in geom.attributes) {
+          const attr = geom.attributes[key];
+          if (attr) {
+            // HỖ TRỢ THUỘC TÍNH INTERLEAVED (được sử dụng bởi instanced meshes):
+            // InterleavedBufferAttribute chỉ có getter cho .array và uỷ quyền mảng thực tế cho .data (InterleavedBuffer).
+            if (attr.isInterleavedBufferAttribute && attr.data && attr.data.array && attr.data.array.length > 0) {
+              geometryArraysCache.set(attr.data, attr.data.array);
+              if (typeof attr.data.onUpload === 'function') {
+                attr.data.onUpload(() => {});
+              }
+            } else if (attr.array && attr.array.length > 0) {
+              geometryArraysCache.set(attr, attr.array);
+              if (typeof attr.onUpload === 'function') {
+                attr.onUpload(() => {});
+              }
+            }
+          }
+        }
+        if (geom.index && geom.index.array && geom.index.array.length > 0) {
+          geometryArraysCache.set(geom.index, geom.index.array);
+          if (typeof geom.index.onUpload === 'function') {
+            geom.index.onUpload(() => {});
+          }
+        }
+      }
+      if (child.isInstancedMesh && child.instanceMatrix && child.instanceMatrix.array && child.instanceMatrix.array.length > 0) {
+        geometryArraysCache.set(child.instanceMatrix, child.instanceMatrix.array);
+        if (typeof child.instanceMatrix.onUpload === 'function') {
+          child.instanceMatrix.onUpload(() => {});
+        }
+      }
+    }
+  });
+}
+
+function restoreGeometryArrays(object: THREE.Object3D) {
+  let restoredCount = 0;
+  object.traverse((child: any) => {
+    if (child.isMesh || child.isInstancedMesh) {
+      const geom = child.geometry;
+      if (geom) {
+        for (const key in geom.attributes) {
+          const attr = geom.attributes[key];
+          if (attr) {
+            if (attr.isInterleavedBufferAttribute && attr.data && !attr.data.array) {
+              const cached = geometryArraysCache.get(attr.data);
+              if (cached) {
+                attr.data.array = cached;
+                attr.data.needsUpdate = true;
+                restoredCount++;
+              }
+            } else if (!attr.array) {
+              const cached = geometryArraysCache.get(attr);
+              if (cached) {
+                attr.array = cached;
+                attr.needsUpdate = true;
+                restoredCount++;
+              }
+            }
+          }
+        }
+        if (geom.index && !geom.index.array) {
+          const cached = geometryArraysCache.get(geom.index);
+          if (cached) {
+            geom.index.array = cached;
+            geom.index.needsUpdate = true;
+            restoredCount++;
+          }
+        }
+      }
+      if (child.isInstancedMesh && child.instanceMatrix && !child.instanceMatrix.array) {
+        const cached = geometryArraysCache.get(child.instanceMatrix);
+        if (cached) {
+          child.instanceMatrix.array = cached;
+          child.instanceMatrix.needsUpdate = true;
+          restoredCount++;
+        }
+      }
+    }
+  });
+  if (restoredCount > 0) {
+    console.log(`[CDEViewer DEBUG] Restored ${restoredCount} geometry arrays from cache map.`);
+  }
+}
+
 
 // ---------------------------------------------------------------------------
 // BIM Engine + Clipper + Hider + BoundingBoxer + Selection
@@ -32,6 +133,7 @@ export interface TreeNodeData {
   localId?: number;
   rawCategory?: string;
   rawName?: string;
+  description?: string;
 }
 
 export type ToolMode = 'select' | 'clip' | 'none';
@@ -49,7 +151,8 @@ export interface BimEngine {
   // Mapbox
   initMapbox: (container: HTMLDivElement) => void;
   setMapboxEnabled: (enabled: boolean) => void;
-  updateMapboxGISParameters: (center: [number, number], elevation: number, heading: number, modelOrigin?: [number, number, number]) => void;
+  updateMapboxGISParameters: (center: [number, number], elevation: number, heading: number, modelOrigin?: [number, number, number], flyToCenter?: boolean) => void;
+  setMapboxStyle: (style: string) => void;
 
   // Selection
   setupSelection: (
@@ -130,6 +233,18 @@ export async function createBimEngine(
   onStatus?.('Setting up fragments...');
   const fragments = await setupFragments(components, world);
 
+  // Tự động sao lưu bộ đệm hình học của mỗi model khi được load vào hệ thống
+  fragments.list.onItemSet.add(({ value: model }) => {
+    // Lắng nghe khi có child mesh mới được thêm vào từ worker
+    model.object.addEventListener('childadded', (event: any) => {
+      if (event.child) {
+        cacheGeometryArrays(event.child);
+      }
+    });
+    // Sao lưu bất kỳ meshes nào đã có sẵn
+    cacheGeometryArrays(model.object);
+  });
+
   onStatus?.('Setting up web-ifc...');
   const ifcLoader = await setupIfcLoader(components);
 
@@ -164,53 +279,185 @@ export async function createBimEngine(
   }
 
   function setMapboxEnabled(enabled: boolean) {
+    console.log(`[CDEViewer DEBUG] Current fragments list size: ${fragments.list.size}`);
+    
     mapBoxComponent.enabled = enabled;
     if (enabled) {
+      // TẮT LUỒNG KẾT XUẤT CỦA THREE.JS CỤC BỘ ĐỂ TIẾT KIỆM TÀI NGUYÊN GPU:
+      if (world.renderer) {
+        world.renderer.enabled = false;
+        console.log(`[CDEViewer DEBUG] Disabled local world.renderer.`);
+      }
+
       if (!mapBoxComponent.isSetup) {
+        console.log(`[CDEViewer DEBUG] MapBoxComponent not setup. Calling setup()...`);
         mapBoxComponent.setup();
       }
-      // Move all loaded fragments/models to Mapbox scene
+      
+      // Di chuyển tất cả fragments/models từ local scene sang Mapbox scene
       for (const group of fragments.list.values()) {
+        console.log(`[CDEViewer DEBUG] Moving modelId=${group.modelId} to Mapbox scene.`);
+        // Khôi phục mảng CPU của geometry trước khi di chuyển sang Mapbox renderer
+        restoreGeometryArrays(group.object);
+
         mapBoxComponent.scene.add(group.object);
-        // Disable frustum culling for meshes with valid geometry
-        // (Mapbox manually sets camera.projectionMatrix, making Three.js frustum check incorrect)
+        
+        // ĐỒNG BỘ CAMERA ĐỂ TRÁNH LỖI CULLING LÀM ẨN MÔ HÌNH:
+        group.useCamera(mapBoxComponent.camera);
+
+        // Vô hiệu hóa frustum culling của Three.js
+        let meshCount = 0;
         group.object.traverse((child: any) => {
           if ((child.isMesh || child.isInstancedMesh) && child.geometry?.attributes?.position?.array) {
             child.frustumCulled = false;
+            meshCount++;
           }
         });
+        console.log(`[CDEViewer DEBUG] Disabled frustumCulled for ${meshCount} meshes in modelId=${group.modelId}`);
       }
+      // Buộc FragmentsManager cập nhật ngay lập tức các mesh theo camera mới
+      fragments.core.update(true);
+
+      console.log(`[CDEViewer DEBUG] Mapbox coord before update: center=${JSON.stringify(mapBoxComponent.coord.center)}, elevation=${mapBoxComponent.coord.elevation}, heading=${mapBoxComponent.coord.heading}, modelOrigin=${JSON.stringify(mapBoxComponent.coord.modelOrigin)}`);
+
+      // SỬA LỖI TRỄ REFLOW CỦA TRÌNH DUYỆT & TRÁNH TRÙNG LẶP ANIMATION BAY CAMERA:
+      // Lần gọi đầu tiên (lập tức): bay camera tới mô hình (flyToCenter = true)
       mapBoxComponent.onResize();
-      updateMapboxGISParameters(mapBoxComponent.coord.center, mapBoxComponent.coord.elevation, mapBoxComponent.coord.heading, mapBoxComponent.coord.modelOrigin);
+      updateMapboxGISParameters(mapBoxComponent.coord.center, mapBoxComponent.coord.elevation, mapBoxComponent.coord.heading, mapBoxComponent.coord.modelOrigin, true);
+
+      setTimeout(() => {
+        console.log(`[CDEViewer DEBUG] Delayed resize and parameter update (100ms)...`);
+        mapBoxComponent.onResize();
+        // Lần gọi thứ hai (sau 100ms): chỉ cập nhật kích thước vẽ, KHÔNG chạy lại hoạt cảnh bay camera (flyToCenter = false)
+        updateMapboxGISParameters(mapBoxComponent.coord.center, mapBoxComponent.coord.elevation, mapBoxComponent.coord.heading, mapBoxComponent.coord.modelOrigin, false);
+        
+        if (mapBoxComponent.renderer) {
+          const canvas = mapBoxComponent.map?.getCanvas();
+          console.log(`[CDEViewer DEBUG] Mapbox canvas client size: ${canvas?.clientWidth}x${canvas?.clientHeight}`);
+          const rect = mapBoxComponent.renderer.domElement.getBoundingClientRect();
+          console.log(`[CDEViewer DEBUG] WebGLRenderer DOM rect: ${rect.width}x${rect.height}`);
+          console.log(`[CDEViewer DEBUG] MapBoxComponent camera aspect: ${mapBoxComponent.camera.aspect}`);
+          console.log(`[CDEViewer DEBUG] MapBoxComponent camera projection matrix:`, Array.from(mapBoxComponent.camera.projectionMatrix.elements).map(n => Number(n.toFixed(6))));
+        }
+      }, 100);
     } else {
-      // Move all loaded fragments/models back to local scene
+      console.log(`[CDEViewer DEBUG] Disabling Mapbox. Moving models back to local scene.`);
+      // BẬT LẠI LUỒNG KẾT XUẤT CỦA THREE.JS CỤC BỘ KHI TẮT BẢN ĐỒ:
+      if (world.renderer) {
+        world.renderer.enabled = true;
+        console.log(`[CDEViewer DEBUG] Enabled local world.renderer.`);
+      }
+
+      // Di chuyển tất cả fragments/models quay về local scene
       for (const group of fragments.list.values()) {
+        console.log(`[CDEViewer DEBUG] Moving modelId=${group.modelId} to local scene.`);
         world.scene.three.add(group.object);
-        // Restore frustum culling for local scene
+        
+        // Trả lại camera của Three.js cục bộ cho mô hình
+        group.useCamera(world.camera.three);
+        
+        // Phục hồi lại frustum culling cho local scene
+        let meshCount = 0;
         group.object.traverse((child: any) => {
           if (child.isMesh || child.isInstancedMesh) {
             child.frustumCulled = true;
+            meshCount++;
           }
         });
+        console.log(`[CDEViewer DEBUG] Restored frustumCulled for ${meshCount} meshes in modelId=${group.modelId}`);
       }
+      // Buộc FragmentsManager cập nhật ngay lập tức các mesh theo camera mới
+      fragments.core.update(true);
+
+      // SỬA LỖI LỆCH/MẤT MÔ HÌNH KHI QUAY LẠI CHẾ ĐỘ THƯỜNG (NO-MAP MODE):
+      setTimeout(() => {
+        console.log(`[CDEViewer DEBUG] Delayed local resize and zoomToFit (100ms)...`);
+        if (world.renderer) {
+          world.renderer.resize();
+        }
+        zoomToFit();
+      }, 100);
     }
   }
 
-  function updateMapboxGISParameters(center: [number, number], elevation: number, heading: number, modelOrigin: [number, number, number] = [0, 0, 0]) {
+  function updateMapboxGISParameters(
+    center: [number, number],
+    elevation: number,
+    heading: number,
+    modelOrigin: [number, number, number] = [0, 0, 0],
+    flyToCenter = false
+  ) {
+    console.log(`[CDEViewer DEBUG] updateMapboxGISParameters called: center=${JSON.stringify(center)}, elevation=${elevation}, heading=${heading}, modelOrigin=${JSON.stringify(modelOrigin)}, flyToCenter=${flyToCenter}`);
     mapBoxComponent.coord.center = center;
     mapBoxComponent.coord.elevation = elevation;
     mapBoxComponent.coord.heading = heading;
     mapBoxComponent.coord.modelOrigin = modelOrigin;
     if (mapBoxComponent.map) {
-      mapBoxComponent.map.flyTo({
-        center: center,
-        zoom: 18,
-        essential: true
-      });
+      if (flyToCenter) {
+        console.log(`[CDEViewer DEBUG] Flying Mapbox to center: ${JSON.stringify(center)}`);
+        mapBoxComponent.map.flyTo({
+          center: center,
+          zoom: 18,
+          essential: true
+        });
+      } else {
+        // Chỉ vẽ lại mà không chạy hoạt cảnh di chuyển camera, tránh giật lag camera
+        mapBoxComponent.map.triggerRepaint();
+      }
+    } else {
+      console.warn(`[CDEViewer DEBUG] Mapbox map instance is not created yet!`);
     }
   }
 
-  // --- Build tree ---
+  function requestMapboxRepaint() {
+    if (mapBoxComponent.enabled && mapBoxComponent.map) {
+      mapBoxComponent.map.triggerRepaint();
+    }
+  }
+
+  /**
+   * Thay đổi kiểu bản đồ nền Mapbox (Ví dụ: Vệ tinh, Địa hình, Bản đồ tối, Mặc định).
+   * Khi gọi map.setStyle(), Mapbox sẽ tải lại toàn bộ bản đồ nền.
+   * Lớp mô hình 3D (customLayer) sẽ được tự động vẽ lại thông qua sự kiện "style.load"
+   * được định nghĩa trong MapBoxComponent/index.ts để tránh bị mất vị trí.
+   */
+  function setMapboxStyle(style: string) {
+    if (mapBoxComponent.map) {
+      mapBoxComponent.map.setStyle(style);
+      console.log(`[CDEViewer] Mapbox style changed to: ${style}`);
+    }
+  }
+
+  function flattenSpatialTree(node: any): any {
+    if (!node) return null;
+    
+    if (Array.isArray(node.children)) {
+      const newChildren: any[] = [];
+      for (const child of node.children) {
+        const childId = child.expressID ?? child.localId;
+        const parentId = node.expressID ?? node.localId;
+        const childCat = String(child.type || child.Type || child.category || '').toUpperCase();
+        
+        const isDuplicate = (childId !== undefined && childId !== null && childId === parentId);
+        const isRelation = childCat.startsWith('IFCREL') || childCat === 'IFCUNKNOWN' || !childCat;
+        
+        if (isDuplicate || isRelation) {
+          if (Array.isArray(child.children)) {
+            for (const gchild of child.children) {
+              const processed = flattenSpatialTree(gchild);
+              if (processed) newChildren.push(processed);
+            }
+          }
+        } else {
+          const processed = flattenSpatialTree(child);
+          if (processed) newChildren.push(processed);
+        }
+      }
+      node.children = newChildren;
+    }
+    return node;
+  }
+
   async function buildTreeData(): Promise<TreeNodeData[]> {
     const roots: TreeNodeData[] = [];
     
@@ -218,7 +465,11 @@ export async function createBimEngine(
       try {
         const spatialTree = await model.getSpatialStructure();
         if (spatialTree) {
-          const rootNode = buildSpatialNode(spatialTree, model, modelId);
+          console.log("=== RAW SPATIAL TREE ===", JSON.stringify(spatialTree, null, 2));
+          const flattened = flattenSpatialTree(spatialTree);
+          console.log("=== FLATTENED TREE ===", JSON.stringify(flattened, null, 2));
+          const modelExpressIDs = new Set<number>(await model.getItemsIds());
+          const rootNode = buildSpatialNode(flattened, model, modelId, modelExpressIDs);
           if (rootNode) {
             roots.push(rootNode);
           }
@@ -268,6 +519,7 @@ export async function createBimEngine(
     currentHighlightMap = modelIdMap;
     await fragments.highlight(selectStyle as any, modelIdMap);
     await fragments.core.update(true);
+    requestMapboxRepaint();
   }
 
   async function clearHighlight() {
@@ -275,6 +527,7 @@ export async function createBimEngine(
       await fragments.resetHighlight(currentHighlightMap);
       await fragments.core.update(true);
       currentHighlightMap = null;
+      requestMapboxRepaint();
     }
   }
 
@@ -282,16 +535,19 @@ export async function createBimEngine(
   async function setVisibility(visible: boolean, modelIdMap?: Record<string, Set<number>>) {
     await hider.set(visible, modelIdMap);
     await fragments.core.update(true);
+    requestMapboxRepaint();
   }
 
   async function isolateItems(modelIdMap: Record<string, Set<number>>) {
     await hider.isolate(modelIdMap);
     await fragments.core.update(true);
+    requestMapboxRepaint();
   }
 
   async function showAll() {
     await hider.set(true);
     await fragments.core.update(true);
+    requestMapboxRepaint();
   }
 
   // --- Clipping ---
@@ -301,14 +557,17 @@ export async function createBimEngine(
 
   async function createClip() {
     await clipper.create(world);
+    requestMapboxRepaint();
   }
 
   async function deleteClip() {
     await clipper.delete(world);
+    requestMapboxRepaint();
   }
 
   function deleteAllClips() {
     clipper.deleteAll();
+    requestMapboxRepaint();
   }
 
   function getClipCount() {
@@ -316,9 +575,73 @@ export async function createBimEngine(
   }
 
   // --- Camera ---
+  /**
+   * CĂN GÓC NHÌN (ZOOM TO FIT) & GIẢI QUYẾT LỖI ĐƠ/TREO CAMERA KHI LOAD MÔ HÌNH:
+   * 
+   * Lỗi gốc: Thư viện @thatopen/fragments nạp hình học meshes bất đồng bộ từ các luồng Web Workers.
+   * Khi bắt đầu gọi load file, mô hình đã được đăng ký vào fragments.list nhưng hình học bên trong
+   * (vertices/faces) thì CHƯA được nạp xong. Nếu gọi ngay boxer.addFromModels() lúc này, bounding box
+   * của mô hình sẽ trả về tọa độ NaN hoặc Infinity.
+   * Khi truyền tham số NaN vào world.camera.controls.setLookAt(), ma trận view nội bộ của camera-controls
+   * bị lỗi toán học làm đơ camera hoàn toàn (không xoay hay zoom chuột được nữa), chỉ khi bấm nút reset view
+   * (ví dụ Top, Left, Right) ép setLookAt về số thực hợp lệ thì camera mới hoạt động trở lại.
+   * 
+   * Giải pháp:
+   * 1. Triển khai một vòng lặp chờ (retry loop tối đa 6 giây = 30 lần * 200ms).
+   * 2. Kiểm tra cờ `model.isBusy` để xem worker đã hoàn thành nạp mesh hay chưa.
+   * 3. Tính toán bounding box thử và chỉ gọi setLookAt khi và chỉ khi tọa độ center của box là số hợp lệ (`!isNaN(center.x)`).
+   * 4. Nếu quá 6 giây vẫn lỗi, ta bỏ qua (skip zoom) và in cảnh báo chứ không gọi setLookAt để bảo vệ camera khỏi bị đơ.
+   */
   async function zoomToFit() {
     const modelIds = Array.from(fragments.list.keys()).map((id) => new RegExp(`^${id}$`));
     if (modelIds.length === 0) return;
+
+    let retries = 0;
+    const maxRetries = 30; // 30 * 200ms = 6 giây chờ tối đa
+    
+    while (retries < maxRetries) {
+      // 1. Kiểm tra xem có mô hình nào đang bận nạp dữ liệu hay không
+      let anyBusy = false;
+      for (const model of fragments.list.values()) {
+        if ((model as any).isBusy) {
+          anyBusy = true;
+          break;
+        }
+      }
+      
+      // 2. Tính toán thử hộp giới hạn Bounding Box
+      boxer.addFromModels(modelIds);
+      const box = boxer.get();
+      const center = new THREE.Vector3();
+      const size = new THREE.Vector3();
+      box.getCenter(center);
+      box.getSize(size);
+      const maxDim = Math.max(size.x, size.y, size.z);
+      const dist = maxDim * 1.5;
+      
+      // Kiểm tra Bounding Box có hợp lệ (không chứa giá trị NaN hay Infinity)
+      const isValidBox = !isNaN(center.x) && !isNaN(center.y) && !isNaN(center.z) &&
+                         !isNaN(dist) && isFinite(dist) && dist > 0.01;
+      
+      // Nếu mô hình đã xong và Bounding Box hợp lệ -> Tiến hành Zoom
+      if (!anyBusy && isValidBox) {
+        console.log(`[zoomToFit] Bounding box is ready and valid after ${retries * 200}ms. Zooming...`);
+        await world.camera.controls.setLookAt(
+          center.x + dist * 0.5, center.y + dist * 0.5, center.z + dist * 0.5,
+          center.x, center.y, center.z,
+          true,
+        );
+        boxer.dispose();
+        return;
+      }
+      
+      // Giải phóng tài nguyên tạm thời và đợi 200ms trước khi thử lại
+      boxer.dispose();
+      retries++;
+      await new Promise(resolve => setTimeout(resolve, 200));
+    }
+    
+    // Dự phòng sau khi timeout: Chỉ chuyển camera nếu Bounding Box hợp lệ (tránh NaN)
     boxer.addFromModels(modelIds);
     const box = boxer.get();
     const center = new THREE.Vector3();
@@ -327,12 +650,20 @@ export async function createBimEngine(
     box.getSize(size);
     const maxDim = Math.max(size.x, size.y, size.z);
     const dist = maxDim * 1.5;
-
-    await world.camera.controls.setLookAt(
-      center.x + dist * 0.5, center.y + dist * 0.5, center.z + dist * 0.5,
-      center.x, center.y, center.z,
-      true,
-    );
+    
+    const isValidBox = !isNaN(center.x) && !isNaN(center.y) && !isNaN(center.z) &&
+                       !isNaN(dist) && isFinite(dist) && dist > 0.01;
+                       
+    if (isValidBox) {
+      console.log(`[zoomToFit] Bounding box valid after timeout. Zooming...`);
+      await world.camera.controls.setLookAt(
+        center.x + dist * 0.5, center.y + dist * 0.5, center.z + dist * 0.5,
+        center.x, center.y, center.z,
+        true,
+      );
+    } else {
+      console.warn("[zoomToFit] Bounding box is empty/invalid. Skipping zoom to prevent camera freeze.");
+    }
     boxer.dispose();
   }
 
@@ -391,6 +722,7 @@ export async function createBimEngine(
         try {
           await fragments.resetHighlight(selectMap);
           await fragments.core.update(true);
+          requestMapboxRepaint();
         } catch { /* ignore */ }
         selectMap = null;
       }
@@ -405,6 +737,7 @@ export async function createBimEngine(
       try {
         await fragments.highlight(selectStyle as any, selectMap);
         await fragments.core.update(true);
+        requestMapboxRepaint();
       } catch { /* ignore */ }
 
       const model = fragments.list.get(pick.modelId);
@@ -429,7 +762,7 @@ export async function createBimEngine(
     setClipperEnabled, createClip, deleteClip, deleteAllClips, getClipCount,
     zoomToFit, setCameraView,
     setToolMode, getToolMode,
-    initMapbox, setMapboxEnabled, updateMapboxGISParameters,
+    initMapbox, setMapboxEnabled, updateMapboxGISParameters, setMapboxStyle,
   };
 }
 
@@ -443,21 +776,75 @@ function cloneModelIdMap(map: Record<string, Set<number>>): Record<string, Set<n
   return result;
 }
 
+function getPluralCategoryName(rawCategory: string): string {
+  const entity = rawCategory.toUpperCase();
+  const mapping: Record<string, string> = {
+    'IFCBUILDINGELEMENTPROXY': 'Building Element Proxies',
+    'IFCWALLSTANDARDCASE': 'Walls Standard Case',
+    'IFCWALL': 'Walls',
+    'IFCSLAB': 'Slabs',
+    'IFCBEAM': 'Beams',
+    'IFCCOLUMN': 'Columns',
+    'IFCFOOTING': 'Footings',
+    'IFCPILE': 'Piles',
+    'IFCMEMBER': 'Members',
+    'IFCPLATE': 'Plates',
+    'IFCRAILING': 'Railings',
+    'IFCDOOR': 'Doors',
+    'IFCWINDOW': 'Windows',
+    'IFCFLOWTERMINAL': 'Flow Terminals',
+    'IFCDISTRIBUTIONELEMENT': 'Distribution Elements',
+  };
+  if (mapping[entity]) return mapping[entity];
+  
+  let formatted = formatIfcEntityName(rawCategory);
+  if (formatted.endsWith('y')) {
+    return formatted.slice(0, -1) + 'ies';
+  }
+  if (formatted.endsWith('s') || formatted.endsWith('x') || formatted.endsWith('ch') || formatted.endsWith('sh')) {
+    return formatted + 'es';
+  }
+  return formatted + 's';
+}
+
+function hasGeometry(node: any, expressIds: Set<number>): boolean {
+  if (!node) return false;
+  const localId = (node.expressID !== undefined && node.expressID !== null)
+    ? node.expressID
+    : ((node.localId !== undefined && node.localId !== null) ? node.localId : null);
+  if (localId !== null && expressIds.has(localId)) {
+    return true;
+  }
+  if (Array.isArray(node.children)) {
+    for (const child of node.children) {
+      if (hasGeometry(child, expressIds)) return true;
+    }
+  }
+  return false;
+}
+
 function buildSpatialNode(
   item: any,
   model: any,
   modelId: string,
+  modelExpressIDs: Set<number>,
 ): TreeNodeData | null {
   if (!item) return null;
   
-  const localId = item.localId;
-  const category = item.category || '';
+  const localId = (item.expressID !== undefined && item.expressID !== null)
+    ? item.expressID
+    : ((item.localId !== undefined && item.localId !== null) ? item.localId : null);
+
+  const category = item.type || item.Type || item.category || '';
+  const catUpper = category.toUpperCase();
   
   let name = '';
+  let description = '';
   if (localId !== null && model.properties) {
     const entity = model.properties[localId];
     if (entity) {
       name = unwrap(entity.LongName) || unwrap(entity.Name) || unwrap(entity.ObjectType) || '';
+      description = unwrap(entity.Description) || '';
     }
   }
   
@@ -465,16 +852,77 @@ function buildSpatialNode(
   const formattedCategory = formatIfcEntityName(category);
   
   if (name) {
-    title = `${formattedCategory} (${name})`;
+    title = name;
   } else {
-    title = localId !== null ? `${formattedCategory} #${localId}` : formattedCategory;
+    title = localId !== null ? `#${localId}` : formattedCategory;
   }
   
   const children: TreeNodeData[] = [];
+  
   if (item.children) {
-    for (const child of item.children) {
-      const childNode = buildSpatialNode(child, model, modelId);
-      if (childNode) children.push(childNode);
+    const isSpatial = catUpper === 'IFCPROJECT' || catUpper === 'IFCSITE' || catUpper === 'IFCBUILDING' || catUpper === 'IFCBUILDINGSTOREY' || catUpper === 'IFCSPACE' || catUpper === '';
+    
+    if (isSpatial) {
+      const spatialChildren: any[] = [];
+      const physicalChildren: any[] = [];
+      
+      for (const child of item.children) {
+        const childCat = String(child.type || child.Type || child.category || '').toUpperCase();
+        if (childCat === 'IFCPROJECT' || childCat === 'IFCSITE' || childCat === 'IFCBUILDING' || childCat === 'IFCBUILDINGSTOREY' || childCat === 'IFCSPACE') {
+          spatialChildren.push(child);
+        } else {
+          physicalChildren.push(child);
+        }
+      }
+      
+      for (const child of spatialChildren) {
+        const childNode = buildSpatialNode(child, model, modelId, modelExpressIDs);
+        if (childNode) children.push(childNode);
+      }
+      
+      if (physicalChildren.length > 0) {
+        const groups = new Map<string, any[]>();
+        for (const child of physicalChildren) {
+          const cat = child.type || child.Type || child.category || 'Unknown';
+          if (!groups.has(cat)) groups.set(cat, []);
+          groups.get(cat)!.push(child);
+        }
+        
+        for (const [cat, items] of groups.entries()) {
+          const folderChildren: TreeNodeData[] = [];
+          for (const child of items) {
+            const childNode = buildSpatialNode(child, model, modelId, modelExpressIDs);
+            if (childNode) folderChildren.push(childNode);
+          }
+          
+          const pluralCategory = getPluralCategoryName(cat);
+          const folderModelIdMap: Record<string, Set<number>> = {};
+          for (const childNode of folderChildren) {
+            if (childNode.modelIdMap) {
+              for (const [mid, ids] of Object.entries(childNode.modelIdMap)) {
+                if (!folderModelIdMap[mid]) folderModelIdMap[mid] = new Set();
+                for (const id of ids) folderModelIdMap[mid].add(id);
+              }
+            }
+          }
+          
+          children.push({
+            key: `group-folder-${modelId}-${cat}-${Math.random()}`,
+            title: pluralCategory,
+            icon: 'category',
+            children: folderChildren,
+            modelIdMap: Object.keys(folderModelIdMap).length > 0 ? folderModelIdMap : undefined,
+            rawCategory: pluralCategory,
+            rawName: '',
+          });
+        }
+      }
+    } else {
+      // Non-spatial elements (like physical instances, type objects, material layers): list all child items directly
+      for (const child of item.children) {
+        const childNode = buildSpatialNode(child, model, modelId, modelExpressIDs);
+        if (childNode) children.push(childNode);
+      }
     }
   }
   
@@ -487,15 +935,12 @@ function buildSpatialNode(
     if (child.modelIdMap) {
       for (const [mid, ids] of Object.entries(child.modelIdMap)) {
         if (!modelIdMap[mid]) modelIdMap[mid] = new Set();
-        for (const id of ids) {
-          modelIdMap[mid].add(id);
-        }
+        for (const id of ids) modelIdMap[mid].add(id);
       }
     }
   }
   
   let icon = 'element';
-  const catUpper = category.toUpperCase();
   if (catUpper.includes('PROJECT')) icon = 'building';
   else if (catUpper.includes('SITE')) icon = 'folder';
   else if (catUpper.includes('BUILDING') && !catUpper.includes('STOREY') && !catUpper.includes('ELEMENT')) icon = 'building';
@@ -510,8 +955,9 @@ function buildSpatialNode(
     modelIdMap: Object.keys(modelIdMap).length > 0 ? modelIdMap : undefined,
     modelId,
     localId: localId !== null ? localId : undefined,
-    rawCategory: formattedCategory,
+    rawCategory: formattedCategory.replace(/^Ifc/, ''),
     rawName: name,
+    description: description || undefined,
   };
 }
 

@@ -70,9 +70,21 @@ export class MapBoxComponent
 
   setup = (config?: Partial<IMapBoxConfig> | undefined) => {
     if (!this.container) throw Error("Container was not initialized!");
-    this.config = { ...this.config, ...config };
-    const { center } = this.config;
-    this.coord.center = center;
+    
+    // SỬA LỖI MẤT TỌA ĐỘ KHI BẬT MAP SAU KHI ĐÃ LOAD MÔ HÌNH:
+    // Nếu mô hình được load trước ở chế độ không map (no-map mode), các tham số tọa độ GIS thực tế
+    // đã được phân tích từ tệp IFC và lưu vào `this.coord.center`.
+    // Khi người dùng bật bản đồ sau đó, hàm `setup()` này chạy. Nếu chúng ta lấy `this.config.center` mặc định
+    // (là Hà Nội) để ghi đè lên `this.coord.center`, tọa độ GIS thực tế của mô hình sẽ bị mất,
+    // dẫn đến việc mô hình hiển thị sai vị trí hoặc bị ẩn hoàn toàn (do lệch ma trận chiếu).
+    // Giải pháp: Ưu tiên chọn tọa độ center hiện có trong `this.coord.center` nếu nó khác tọa độ mặc định,
+    // hoặc lấy từ config truyền vào trực tiếp.
+    const currentCoordCenter = this.coord.center;
+    const isDefaultCenter = currentCoordCenter && currentCoordCenter[0] === 105.804817 && currentCoordCenter[1] === 21.028511;
+    const newCenter = config?.center || (currentCoordCenter && !isDefaultCenter ? currentCoordCenter : this.config.center);
+
+    this.config = { ...this.config, ...config, center: newCenter };
+    this.coord.center = newCenter;
 
     const token = import.meta.env.VITE_MAPBOX_TOKEN || localStorage.getItem("VITE_MAPBOX_TOKEN");
     if (!token || token.trim() === "") {
@@ -135,6 +147,18 @@ export class MapBoxComponent
   }
 
   private onAdd = (map: any, gl: any) => {
+    // SỬA LỖI MẤT MÔ HÌNH KHI THAY ĐỔI STYLE BẢN ĐỒ (SATELLITE, TERRAIN...):
+    // Khi đổi style bản đồ, Mapbox kích hoạt lại sự kiện "style.load" và gọi lại hàm `onAdd()` này.
+    // Nếu chúng ta khởi tạo lại `THREE.WebGLRenderer` mới mỗi lần đổi style, các tài nguyên WebGL cũ
+    // của mô hình (Geometries, Materials, Shaders) đang được lưu cache trong GPU dưới context WebGL cũ
+    // sẽ bị ngắt kết nối hoặc không tương thích với Renderer mới, dẫn tới mô hình bị ẩn/mất hiển thị.
+    // Giải pháp: Chỉ khởi tạo đèn và WebGLRenderer duy nhất một lần (singleton). Các lần đổi style
+    // tiếp theo sẽ tái sử dụng lại Renderer cũ để giữ nguyên cache GPU của mô hình, giúp hiển thị mượt mà.
+    if (this.renderer) {
+      console.log("[CDEViewer] Mapbox style reloaded. Reusing existing Three.js WebGLRenderer.");
+      return;
+    }
+
     const directionalLight = new THREE.DirectionalLight(0xffffff);
     directionalLight.position.set(0, -70, 100).normalize();
     this.scene.add(directionalLight);
@@ -168,6 +192,10 @@ export class MapBoxComponent
     const m = new THREE.Matrix4().fromArray(matrix);
     this.camera.projectionMatrix = m.multiply(this.coord.mapCamera);
 
+    // BỎ CẬP NHẬT CULLING MỖI FRAME (ĐỂ TRÁNH CHỚP NHÁY DO THỂ THỨC MÀN CHIẾU MAPBOX KHÔNG TƯƠNG THÍCH):
+    // fragments.core.update() sẽ không được gọi mỗi frame nữa vì ta đã set child.frustumCulled = false.
+    // Việc này cũng tiết kiệm đáng kể CPU tính toán culling không cần thiết.
+
     // Debug: log once every 120 frames
     this._debugFrameCount++;
     if (this._debugFrameCount === 1 || this._debugFrameCount % 120 === 0) {
@@ -183,13 +211,45 @@ export class MapBoxComponent
           else invisibleCount++;
         }
       });
-      console.log(`[MapBox DEBUG] Frame ${this._debugFrameCount}: scene.children=${this.scene.children.length}, totalMeshes=${totalMeshes}, frustumCulled=${frustumCulledCount}, visible=${visibleCount}, invisible=${invisibleCount}`);
+      const childNames = this.scene.children.map((c: any) => `${c.constructor.name || 'Object'}(uuid=${c.uuid.substring(0,6)}, children=${c.children?.length || 0})`);
+      console.log(`[MapBox DEBUG] Frame ${this._debugFrameCount}: scene.children=${this.scene.children.length} [${childNames.join(', ')}], totalMeshes=${totalMeshes}, frustumCulled=${frustumCulledCount}, visible=${visibleCount}, invisible=${invisibleCount}`);
       console.log(`[MapBox DEBUG] coord: center=${JSON.stringify(this.coord.center)}, modelOrigin=${JSON.stringify(this.coord.modelOrigin)}, elevation=${this.coord.elevation}`);
+      console.log(`[MapBox DEBUG] camera projection matrix elements:`, Array.from(this.camera.projectionMatrix.elements).map(n => Number(n.toFixed(6))));
     }
 
     this.renderer.resetState();
-    this.renderer.render(this.scene, this.camera);
-    this.map!.triggerRepaint();
+    
+    try {
+      this.renderer.render(this.scene, this.camera);
+    } catch (e: any) {
+      console.error("[MapBox Render Error] Error during WebGL render:", e);
+      // Chẩn đoán lỗi: Duyệt toàn bộ mesh trong scene và tìm thuộc tính có array là undefined
+      this.scene.traverse((child: any) => {
+        if (child.isMesh || child.isInstancedMesh) {
+          const geom = child.geometry;
+          if (geom) {
+            for (const key in geom.attributes) {
+              const attr = geom.attributes[key];
+              if (!attr.array) {
+                console.warn(`[MapBox Render Error] Mesh [${child.constructor.name}] ${child.name || child.uuid} has attribute '${key}' with undefined array!`, attr);
+              }
+            }
+            if (geom.index && !geom.index.array) {
+              console.warn(`[MapBox Render Error] Mesh [${child.constructor.name}] ${child.name || child.uuid} has index attribute with undefined array!`, geom.index);
+            }
+          }
+          if (child.isInstancedMesh && child.instanceMatrix && !child.instanceMatrix.array) {
+            console.warn(`[MapBox Render Error] InstancedMesh ${child.name || child.uuid} has instanceMatrix with undefined array!`, child.instanceMatrix);
+          }
+        }
+      });
+      throw e;
+    }
+    
+    // BỎ LỆNH TRIGERREPAINT VÔ HẠN (GIẢM TẢI GPU TỪ 100% XUỐNG MỨC TỐI THIỂU):
+    // Mapbox sẽ tự vẽ lại khi người dùng dịch chuyển bản đồ. Khi thay đổi trạng thái mô hình
+    // (như highlight hoặc ẩn/hiện), engine.ts sẽ kích hoạt triggerRepaint chủ động một lần.
+    // this.map!.triggerRepaint();
   };
 
   private setupMap() {
@@ -200,6 +260,13 @@ export class MapBoxComponent
       onAdd: this.onAdd,
       render: this.render,
     };
+    // GIẢI THÍCH VỀ VIỆC LOAD STYLE BẢN ĐỒ (SATELLITE, TERRAIN, DARK, STREETS...):
+    // Khi người dùng đổi style bản đồ nền (dùng map.setStyle()), Mapbox sẽ xóa toàn bộ
+    // các custom layer đang hiển thị trên bản đồ. Nếu sử dụng sự kiện "load" thông thường,
+    // layer 3D của mô hình BIM sẽ bị mất vĩnh viễn sau lần chuyển style đầu tiên.
+    // Giải pháp: Sử dụng sự kiện "style.load". Sự kiện này kích hoạt mỗi khi một style
+    // bản đồ nền tải xong. Nhờ đó, customLayer vẽ mô hình BIM 3D sẽ tự động được re-add
+    // và căn chỉnh lại đúng tọa độ GIS mà không bị biến mất hay sai lệch vị trí.
     this.map!.on("style.load", () => {
       //@ts-ignore
       this.map!.addLayer(customLayer);
@@ -236,11 +303,17 @@ export class MapBoxComponent
       if (this.renderer?.domElement) {
         const { width, height } =
           this.renderer.domElement.getBoundingClientRect();
-        this.labelRenderer.setSize(width, height);
-        this.camera.aspect = width / height;
-        this.camera.updateProjectionMatrix();
+        
+        // SỬA LỖI TRÁNH GÁN CAMERA ASPECT BẰNG NaN/0 KHI KÍCH THƯỚC DOM CHƯA SẴN SÀNG:
+        // Nếu width hoặc height quá nhỏ (< 10px), việc tính camera.aspect sẽ cho giá trị không hợp lệ,
+        // khiến ThreeJS bị hỏng ma trận chiếu và không vẽ mô hình nữa.
+        if (width > 10 && height > 10) {
+          this.labelRenderer.setSize(width, height);
+          this.camera.aspect = width / height;
+          this.camera.updateProjectionMatrix();
+        }
       }
-    }, 1);
+    }, 50); // Tăng thời gian chờ từ 1ms lên 50ms để đợi layout trình duyệt ổn định hơn
   };
 
   onResize = () => {

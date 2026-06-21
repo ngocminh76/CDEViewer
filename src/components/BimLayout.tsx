@@ -9,6 +9,8 @@ import RightPanel from './RightPanel.tsx';
 import BottomBar from './BottomBar.tsx';
 import LoginPage from './LoginPage.tsx';
 import ModelTree from './ModelTree.tsx';
+import MapLayerSelector from './MapLayerSelector.tsx';
+import DocumentViewer from './DocumentViewer.tsx';
 import {
   createBimEngine,
   loadIfcFile,
@@ -81,6 +83,10 @@ export default function BimLayout() {
   const [mapboxElevation, setMapboxElevation] = useState<number>(0);
   const [mapboxHeading, setMapboxHeading] = useState<number>(0);
 
+  const [mapboxStyle, setMapboxStyleState] = useState<string>('mapbox://styles/mapbox/streets-v12');
+  const [docOpen, setDocOpen] = useState<boolean>(false);
+  const [selectedNode, setSelectedNode] = useState<{ title: string; category?: string; localId?: number } | null>(null);
+
   // VN-2000 coordination states
   const [rawX, setRawX] = useState<number | null>(null);
   const [rawY, setRawY] = useState<number | null>(null);
@@ -121,6 +127,40 @@ export default function BimLayout() {
     }
   }, []);
 
+  // LIÊN KẾT GÓC NHÌN 3D VÀ BẢN VẼ 2D (SPLIT-SCREEN INTERACTIVE DOCK):
+  // Hook này đồng bộ hóa phần tử đang chọn trong mô hình 3D (selection)
+  // với cấu trúc bản vẽ 2D trong DocumentViewer.
+  // 1. Khi người dùng click chọn 1 đối tượng 3D (Cột, Dầm, Sàn, Tường...), ta lấy thông tin category/localId.
+  // 2. Tự động mở khung bản vẽ 2D (setDocOpen(true)) khi cấu kiện kết cấu được chọn.
+  // 3. DocumentViewer sẽ nhận selectedNode này và tự động chuyển sang trang bản vẽ tương ứng (ví dụ:
+  //    chọn Cột thì mở bản vẽ Chi tiết Cột, chọn cấu kiện Tầng 2 thì chuyển sang Mặt bằng Tầng 2),
+  //    đồng thời tô màu highlight đỏ phần tử tương ứng trên bản vẽ vector SVG.
+  useEffect(() => {
+    if (selection) {
+      const nameAttr = selection.attributes.LongName || selection.attributes.Name || selection.attributes.ObjectType || `#${selection.localId}`;
+      const objType = selection.attributes.ObjectType || '';
+      setSelectedNode({
+        title: nameAttr,
+        category: objType,
+        localId: selection.localId,
+      });
+      // Tự động mở cửa sổ bản vẽ 2D nếu đối tượng chọn là cấu kiện kết cấu chịu lực
+      const cat = objType.toUpperCase();
+      if (cat.includes('COLUMN') || cat.includes('BEAM') || cat.includes('WALL') || cat.includes('SLAB') || cat.includes('PLATE')) {
+        setDocOpen(true);
+      }
+    } else {
+      setSelectedNode(null);
+    }
+  }, [selection]);
+
+  const handleMapboxStyleChange = useCallback((styleUrl: string) => {
+    setMapboxStyleState(styleUrl);
+    if (engineRef.current) {
+      engineRef.current.setMapboxStyle(styleUrl);
+    }
+  }, []);
+
   const refreshClipCount = useCallback(() => {
     if (engineRef.current) setClipCount(engineRef.current.getClipCount());
   }, []);
@@ -146,18 +186,35 @@ export default function BimLayout() {
         setModelCount(size);
         const model = event.value;
 
-        // ONLY georeference on the FIRST model loaded
-        // Subsequent models are already correctly positioned relative to the first model in Three.js space.
+        // NGUYÊN TẮC LIÊN KẾT TỌA ĐỘ GIS KHI TẢI NHIỀU MÔ HÌNH (MULTI-MODEL):
+        // Khi tải mô hình đầu tiên, ta sẽ trích xuất tọa độ VN-2000 / GIS để căn chỉnh
+        // bản đồ Mapbox về đúng vị trí địa lý của dự án.
+        // Tuy nhiên, kể từ mô hình thứ hai trở đi, ta KHÔNG được cập nhật lại tâm bản đồ Mapbox
+        // hay thay đổi tham số GIS nữa. Bởi vì tất cả các mô hình tiếp theo đều đã được đặt vào
+        // cùng một không gian toạ độ cục bộ Three.js của mô hình đầu tiên. Nếu ta cập nhật GIS parameters
+        // theo mô hình thứ hai, toàn bộ mô hình trong không gian 3D sẽ bị lệch khỏi bản đồ Mapbox.
         if (size > 1) {
           console.log('[CDEViewer] Additional model loaded. Skipping Mapbox georeferencing to preserve relative coordinates.');
           return;
+        }
+        
+        // CHỜ HÌNH HỌC MÔ HÌNH ĐƯỢC LOAD XONG TỪ WORKERS:
+        // Do meshes hình học được tải bất đồng bộ ở luồng Worker khác, ta cần đợi cho đến khi
+        // tiến trình này hoàn tất (model.isBusy = false), tránh việc tính toán Bounding Box sai lệch.
+        let loadRetries = 0;
+        while (loadRetries < 30 && (model as any).isBusy) {
+          loadRetries++;
+          await new Promise((resolve) => setTimeout(resolve, 200));
         }
         
         let foundGeoreference = false;
         let isCentered = true;
         let bboxCenter = new THREE.Vector3();
 
-        // 0. Check bounding box to see if the engine centered the model
+        // KIỂM TRA MÔ HÌNH CÓ ĐƯỢC TỰ ĐỘNG CĂN TÂM (CENTERED):
+        // Nếu Bounding Box của mô hình chứa giá trị X, Z rất lớn (> 10000), chứng tỏ loader
+        // KHÔNG căn tâm mô hình về gốc toạ độ (0,0,0) trong Three.js, mà giữ nguyên tọa độ gốc
+        // VN-2000. Nếu là trường hợp này, ta cần truyền tọa độ gốc thực tế cho modelOrigin trong Mapbox.
         try {
           const bboxer = engine.components.get(OBC.BoundingBoxer);
           bboxer.addFromModels([new RegExp(`^${model.modelId}$`)]);
@@ -165,7 +222,6 @@ export default function BimLayout() {
           box.getCenter(bboxCenter);
           bboxer.dispose();
 
-          // If BBox center has large coordinates, the loader did NOT center it
           if (Math.abs(bboxCenter.x) > 10000 && Math.abs(bboxCenter.z) > 10000) {
             isCentered = false;
           }
@@ -173,7 +229,8 @@ export default function BimLayout() {
           console.warn('[CDEViewer] Failed to compute BoundingBox:', e);
         }
         
-        // 1. Try to get from CRSData using getCRS()
+        // BƯỚC 1: Lấy tọa độ trắc địa CRS từ thuộc tính getCRS() của mô hình IFC.
+        // Đây là phương án chính xác nhất thường được xuất từ các phần mềm BIM như Revit (Shared Coordinates).
         try {
           const crs = await model.getCRS();
           console.log('[CDEViewer] Model CRS data:', crs);
@@ -190,10 +247,13 @@ export default function BimLayout() {
               setRawX(absoluteEast);
               setRawY(absoluteNorth);
               setRawZ(height);
-              // Convert to WGS84
+              
+              // Chuyển đổi tọa độ VN-2000 của Việt Nam sang tọa độ địa lý WGS84 (Kinh độ/Vĩ độ)
               const [lng, lat] = vn2000ToWgs84(absoluteEast, absoluteNorth, kttRef.current, zone3degRef.current);
               setMapboxCenter([lng, lat]);
               setMapboxElevation(height);
+              
+              // Nếu mô hình được căn tâm, gốc Three.js sẽ là (0,0,0). Nếu không, nó là [east, height, -north].
               const mOrigin = isCentered ? [0, 0, 0] : [east, height, -north];
               engine.updateMapboxGISParameters([lng, lat], height, mapboxHeadingRef.current, mOrigin as [number,number,number]);
               foundGeoreference = true;
@@ -203,7 +263,7 @@ export default function BimLayout() {
           console.warn('[CDEViewer] Failed to query model.getCRS():', crsErr);
         }
         
-        // 2. Try to get from coordination matrix
+        // BƯỚC 2: Dự phòng lấy tọa độ trắc địa từ Ma trận Định vị liên kết (Coordination Matrix) của IFC.
         if (!foundGeoreference) {
           try {
             const matrix = await model.getCoordinationMatrix();
@@ -211,7 +271,6 @@ export default function BimLayout() {
             pos.setFromMatrixPosition(matrix);
             console.log(`[CDEViewer] Model loaded. Base point coordinates:`, pos);
             
-            // Check if coordination matrix has a large UTM/VN-2000 coordinate
             if (Math.abs(pos.x) > 10000 && Math.abs(pos.z) > 10000) {
               console.log('[CDEViewer] Georeference base point detected from coordination matrix:', pos);
               const absoluteX = Math.abs(pos.x);
@@ -220,7 +279,8 @@ export default function BimLayout() {
               setRawX(absoluteX);
               setRawY(absoluteY);
               setRawZ(pos.y);
-              // Convert to WGS84
+              
+              // Chuyển đổi VN-2000 sang WGS84
               const [lng, lat] = vn2000ToWgs84(absoluteX, absoluteY, kttRef.current, zone3degRef.current);
               setMapboxCenter([lng, lat]);
               setMapboxElevation(pos.y);
@@ -233,7 +293,7 @@ export default function BimLayout() {
           }
         }
 
-        // 3. Try to compute from Bounding Box as fallback if not centered
+        // BƯỚC 3: Dự phòng tính từ tâm Bounding Box nếu mô hình không được căn tâm và các bước trước thất bại
         if (!foundGeoreference && !isCentered) {
           console.log('[CDEViewer] Georeference base point detected from BoundingBox:', bboxCenter);
           const absoluteEast = Math.abs(bboxCenter.x);
@@ -241,7 +301,7 @@ export default function BimLayout() {
           
           setRawX(absoluteEast);
           setRawY(absoluteNorth);
-          setRawZ(bboxCenter.y);  // Elevation is Y
+          setRawZ(bboxCenter.y);
           const [lng, lat] = vn2000ToWgs84(absoluteEast, absoluteNorth, kttRef.current, zone3degRef.current);
           setMapboxCenter([lng, lat]);
           setMapboxElevation(bboxCenter.y);
@@ -249,7 +309,7 @@ export default function BimLayout() {
           foundGeoreference = true;
         }
         
-        // 4. If not found, try to query from IfcSite (RefLatitude/RefLongitude)
+        // BƯỚC 4: Dự phòng lấy tọa độ địa lý kinh độ/vĩ độ trực tiếp từ thực thể IfcSite (RefLatitude, RefLongitude).
         if (!foundGeoreference) {
           try {
             const classifier = engine.classifier;
@@ -279,12 +339,10 @@ export default function BimLayout() {
                     const elevationValue = parsedElev !== null ? parsedElev : 0;
                     setMapboxElevation(elevationValue);
                     
-                    // Since it is direct WGS84, raw VN-2000 coordinates are not applicable
                     setRawX(null);
                     setRawY(null);
                     setRawZ(elevationValue);
                     
-                    // IFCSite coordinates are usually geographic center, map it to BoundingBox center
                     engine.updateMapboxGISParameters([parsedLng, parsedLat], elevationValue, mapboxHeadingRef.current, [bboxCenter.x, bboxCenter.y, bboxCenter.z]);
                     foundGeoreference = true;
                   }
@@ -513,7 +571,8 @@ export default function BimLayout() {
             collapsed={leftCollapsed}
             collapsedWidth={0}
             trigger={null}
-            style={{ background: '#1f1f1f', borderRight: '1px solid #303030', overflow: 'hidden', position: 'relative' }}
+            className="glass-panel-left"
+            style={{ background: 'transparent', overflow: 'hidden', position: 'relative' }}
           >
             {/* Drag handle for left panel */}
             {!leftCollapsed && (
@@ -564,6 +623,7 @@ export default function BimLayout() {
                     onHighlight={(m) => engineRef.current?.highlightItems(m)}
                     onClearHighlight={() => engineRef.current?.clearHighlight()}
                     onHide={(m) => engineRef.current?.setVisibility(false, m)}
+                    onShow={(m) => engineRef.current?.setVisibility(true, m)}
                     onIsolate={(m) => engineRef.current?.isolateItems(m)}
                     onShowAll={() => engineRef.current?.showAll()}
                     onSelectElement={handleSelectElement}
@@ -574,20 +634,46 @@ export default function BimLayout() {
             )}
           </Sider>
 
-          {/* Viewport + floating ToolPanel */}
-          <Content style={{ position: 'relative' }}>
-            <Viewport onMount={handleMount} mapboxEnabled={mapboxEnabled} />
-            <ToolPanel
-              toolMode={toolMode}
-              onToolMode={handleToolMode}
-              clipCount={clipCount}
-              onCreateClip={handleCreateClip}
-              onDeleteClip={handleDeleteClip}
-              onDeleteAllClips={handleDeleteAllClips}
-              onCameraView={handleCameraView}
-              mapboxEnabled={mapboxEnabled}
-              onToggleMapbox={handleToggleMapbox}
-            />
+          {/* Viewport + floating ToolPanel + split-screen DocumentViewer */}
+          <Content style={{ display: 'flex', position: 'relative', height: '100%', overflow: 'hidden' }}>
+            {/* 3D Viewport Pane */}
+            <div style={{ flex: docOpen ? 1 : 2, position: 'relative', height: '100%' }}>
+              <Viewport onMount={handleMount} mapboxEnabled={mapboxEnabled} />
+              
+              {mapboxEnabled && (
+                <MapLayerSelector currentStyle={mapboxStyle} onStyleChange={handleMapboxStyleChange} />
+              )}
+              
+              <ToolPanel
+                toolMode={toolMode}
+                onToolMode={handleToolMode}
+                clipCount={clipCount}
+                onCreateClip={handleCreateClip}
+                onDeleteClip={handleDeleteClip}
+                onDeleteAllClips={handleDeleteAllClips}
+                onCameraView={handleCameraView}
+                mapboxEnabled={mapboxEnabled}
+                onToggleMapbox={handleToggleMapbox}
+                docOpen={docOpen}
+                onToggleDoc={() => setDocOpen(!docOpen)}
+              />
+            </div>
+            
+            {/* 2D Document Pane */}
+            {docOpen && (
+              <div 
+                className="glass-panel" 
+                style={{ 
+                  width: '45%', 
+                  height: '100%', 
+                  borderLeft: '1px solid rgba(255, 255, 255, 0.1)', 
+                  position: 'relative',
+                  zIndex: 30,
+                }}
+              >
+                <DocumentViewer selectedNode={selectedNode} onClose={() => setDocOpen(false)} />
+              </div>
+            )}
           </Content>
 
           {/* Right — Properties */}
@@ -597,7 +683,8 @@ export default function BimLayout() {
             collapsed={rightCollapsed}
             collapsedWidth={0}
             trigger={null}
-            style={{ background: '#1f1f1f', borderLeft: '1px solid #303030', overflow: 'hidden', position: 'relative' }}
+            className="glass-panel-right"
+            style={{ background: 'transparent', overflow: 'hidden', position: 'relative' }}
           >
             {/* Drag handle to resize panel */}
             {!rightCollapsed && (
