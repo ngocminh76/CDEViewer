@@ -21,6 +21,7 @@ import {
   type TreeNodeData,
 } from '../engine.ts';
 import { vn2000ToWgs84 } from '../utils/coordination.ts';
+import { VN2000_PROVINCES } from '../utils/vn2000-provinces.ts';
 
 const { Sider, Content } = Layout;
 
@@ -237,6 +238,76 @@ export default function BimLayout() {
         } catch (e) {
           console.warn('[CDEViewer] Failed to compute BoundingBox:', e);
         }
+
+        // TỰ ĐỘNG NHẬN DIỆN KTT VÀ MÚI CHIẾU CỦA HỆ TỌA ĐỘ VN-2000:
+        let activeKtt = 105.5; // KTT mặc định
+        let activeZone3deg = true; // Múi chiếu mặc định (3 độ)
+
+        // A. Thử tìm vĩ độ/kinh độ thô từ IfcSite để xác định tỉnh thành gần nhất
+        let siteLng: number | null = null;
+        let siteLat: number | null = null;
+        try {
+          const classifier = engine.classifier;
+          const categoryMap = classifier.list.get('Categories');
+          const siteClass = categoryMap?.get('IFCSITE');
+          if (siteClass) {
+            const map = await siteClass.get();
+            const expressIds = map[model.modelId];
+            if (expressIds && expressIds.size > 0) {
+              const siteId = Array.from(expressIds)[0];
+              const dataArr = await model.getItemsData([siteId]);
+              const siteData = Array.isArray(dataArr) && dataArr.length > 0 ? dataArr[0] : null;
+              if (siteData) {
+                const parsedLat = parseIfcCoordinate(siteData.RefLatitude);
+                const parsedLng = parseIfcCoordinate(siteData.RefLongitude);
+                if (parsedLat !== null && parsedLng !== null && (Math.abs(parsedLat) > 0.1 || Math.abs(parsedLng) > 0.1)) {
+                  siteLng = parsedLng;
+                  siteLat = parsedLat;
+                }
+              }
+            }
+          }
+        } catch (siteErr) {
+          console.warn('[CDEViewer] Auto-detect IfcSite query failed:', siteErr);
+        }
+
+        // Nếu tìm thấy kinh độ thô từ IfcSite, chọn KTT của tỉnh gần nhất
+        if (siteLng !== null) {
+          let closestProvince = VN2000_PROVINCES[0];
+          let minDiff = Math.abs(closestProvince.ktt - siteLng);
+          for (const p of VN2000_PROVINCES) {
+            const diff = Math.abs(p.ktt - siteLng);
+            if (diff < minDiff) {
+              minDiff = diff;
+              closestProvince = p;
+            }
+          }
+          activeKtt = closestProvince.ktt;
+          console.log(`[CDEViewer] Auto-detected closest province from IfcSite: ${closestProvince.name} (KTT: ${activeKtt})`);
+        }
+
+        // B. Thử đọc tên CRS để phát hiện KTT và múi chiếu
+        try {
+          const crs = await model.getCRS();
+          if (crs) {
+            const crsMetaString = `${crs.name || ''} ${crs.description || ''} ${crs.geodeticDatum || ''} ${crs.mapProjection || ''} ${crs.mapZone || ''}`;
+            const kttMatch = crsMetaString.match(/(10[3-9](?:\.\d+)?)/);
+            if (kttMatch) {
+              activeKtt = parseFloat(kttMatch[1]);
+              console.log(`[CDEViewer] Overrode KTT from CRS metadata: ${activeKtt}`);
+            }
+            if (crsMetaString.toLowerCase().includes('6deg') || crsMetaString.toLowerCase().includes('6 độ') || crsMetaString.toLowerCase().includes('utm') || crsMetaString.toLowerCase().includes('zone 48') || crsMetaString.toLowerCase().includes('zone 49')) {
+              activeZone3deg = false;
+              console.log('[CDEViewer] Overrode zone to 6-degree from CRS metadata.');
+            }
+          }
+        } catch (crsErr) {
+          console.warn('[CDEViewer] CRS query failed during auto-detect:', crsErr);
+        }
+
+        // Cập nhật state hệ thống đồng bộ
+        setKtt(activeKtt);
+        setZone3deg(activeZone3deg);
         
         // BƯỚC 1: Lấy tọa độ trắc địa CRS từ thuộc tính getCRS() của mô hình IFC.
         // Đây là phương án chính xác nhất thường được xuất từ các phần mềm BIM như Revit (Shared Coordinates).
@@ -257,8 +328,8 @@ export default function BimLayout() {
               setRawY(absoluteNorth);
               setRawZ(height);
               
-              // Chuyển đổi tọa độ VN-2000 của Việt Nam sang tọa độ địa lý WGS84 (Kinh độ/Vĩ độ)
-              const [lng, lat] = vn2000ToWgs84(absoluteEast, absoluteNorth, kttRef.current, zone3degRef.current);
+              // Chuyển đổi tọa độ VN-2000 của Việt Nam sang tọa độ địa lý WGS84 (Kinh độ/Vĩ độ) với 7 tham số
+              const [lng, lat] = vn2000ToWgs84(absoluteEast, absoluteNorth, activeKtt, activeZone3deg, height);
               setMapboxCenter([lng, lat]);
               setMapboxElevation(height);
               
@@ -289,8 +360,8 @@ export default function BimLayout() {
               setRawY(absoluteY);
               setRawZ(pos.y);
               
-              // Chuyển đổi VN-2000 sang WGS84
-              const [lng, lat] = vn2000ToWgs84(absoluteX, absoluteY, kttRef.current, zone3degRef.current);
+              // Chuyển đổi VN-2000 sang WGS84 với 7 tham số
+              const [lng, lat] = vn2000ToWgs84(absoluteX, absoluteY, activeKtt, activeZone3deg, pos.y);
               setMapboxCenter([lng, lat]);
               setMapboxElevation(pos.y);
               const mOrigin = isCentered ? [0, 0, 0] : [pos.x, pos.y, pos.z];
@@ -311,7 +382,8 @@ export default function BimLayout() {
           setRawX(absoluteEast);
           setRawY(absoluteNorth);
           setRawZ(bboxCenter.y);
-          const [lng, lat] = vn2000ToWgs84(absoluteEast, absoluteNorth, kttRef.current, zone3degRef.current);
+          // Chuyển đổi VN-2000 sang WGS84 với 7 tham số
+          const [lng, lat] = vn2000ToWgs84(absoluteEast, absoluteNorth, activeKtt, activeZone3deg, bboxCenter.y);
           setMapboxCenter([lng, lat]);
           setMapboxElevation(bboxCenter.y);
           engine.updateMapboxGISParameters([lng, lat], bboxCenter.y, mapboxHeadingRef.current, [bboxCenter.x, bboxCenter.y, bboxCenter.z], true);

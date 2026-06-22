@@ -1,12 +1,14 @@
 /**
  * Conversion utility from VN-2000 Coordinate System (Transverse Mercator)
- * to WGS84 Geodetic coordinates (Latitude / Longitude).
+ * to WGS84 Geodetic coordinates (Latitude / Longitude) using the official
+ * 7-parameter Helmert datum transformation (Decision 973/2001/QĐ-TCĐC).
  */
 export function vn2000ToWgs84(
   easting: number,
   northing: number,
   centralMeridianDeg: number,
-  zone3deg: boolean = true
+  zone3deg: boolean = true,
+  height: number = 0
 ): [number, number] {
   // Ellipsoid parameters for WGS84 / VN2000
   const a = 6378137.0; // semi-major axis
@@ -44,7 +46,7 @@ export function vn2000ToWgs84(
 
   const D = x / (nu1 * k0);
 
-  // Latitude calculation
+  // Latitude calculation on VN-2000 ellipsoid
   const latRad =
     phi1 -
     ((nu1 * Math.tan(phi1)) / rho1) *
@@ -54,7 +56,7 @@ export function vn2000ToWgs84(
           Math.pow(D, 6)) /
           720.0);
 
-  // Longitude calculation
+  // Longitude calculation on VN-2000 ellipsoid
   const lonRad =
     (D -
       ((1.0 + 2.0 * T1 + C1) * Math.pow(D, 3)) / 6.0 +
@@ -63,8 +65,47 @@ export function vn2000ToWgs84(
         120.0) /
     Math.cos(phi1);
 
-  const lat = (latRad * 180.0) / Math.PI;
-  const lon = centralMeridianDeg + (lonRad * 180.0) / Math.PI;
+  const latVn = latRad;
+  const lonVn = (centralMeridianDeg * Math.PI) / 180.0 + lonRad;
 
-  return [lon, lat];
+  // Convert VN-2000 Geodetic (lat, lon, height) to Geocentric Cartesian (X, Y, Z)
+  const sinLat = Math.sin(latVn);
+  const cosLat = Math.cos(latVn);
+  const sinLon = Math.sin(lonVn);
+  const cosLon = Math.cos(lonVn);
+
+  const N = a / Math.sqrt(1.0 - e2 * sinLat * sinLat);
+  const X_vn = (N + height) * cosLat * cosLon;
+  const Y_vn = (N + height) * cosLat * sinLon;
+  const Z_vn = (N * (1.0 - e2) + height) * sinLat;
+
+  // 7-parameter Helmert transformation from VN-2000 to WGS-84
+  const dx = -191.9; // meters
+  const dy = -39.3;  // meters
+  const dz = -111.5; // meters
+  const wx = -0.0093 * Math.PI / (180.0 * 3600.0); // radians (from arcseconds)
+  const wy = -0.0104 * Math.PI / (180.0 * 3600.0); // radians (from arcseconds)
+  const wz = -0.0115 * Math.PI / (180.0 * 3600.0); // radians (from arcseconds)
+  const ds = -0.1299e-6; // scale factor change
+
+  const X_wgs = dx + (1.0 + ds) * (X_vn - wz * Y_vn + wy * Z_vn);
+  const Y_wgs = dy + (1.0 + ds) * (wz * X_vn + Y_vn - wx * Z_vn);
+  const Z_wgs = dz + (1.0 + ds) * (-wy * X_vn + wx * Y_vn + Z_vn);
+
+  // Convert WGS-84 Geocentric Cartesian (X, Y, Z) back to WGS-84 Geodetic (lat, lon)
+  // Using Bowring's method
+  const p = Math.sqrt(X_wgs * X_wgs + Y_wgs * Y_wgs);
+  const theta = Math.atan2(Z_wgs * a, p * b);
+  
+  const latWgsRad = Math.atan2(
+    Z_wgs + ePrime2 * b * Math.pow(Math.sin(theta), 3),
+    p - e2 * a * Math.pow(Math.cos(theta), 3)
+  );
+  const lonWgsRad = Math.atan2(Y_wgs, X_wgs);
+
+  const latWgs = (latWgsRad * 180.0) / Math.PI;
+  const lonWgs = (lonWgsRad * 180.0) / Math.PI;
+
+  return [lonWgs, latWgs];
 }
+

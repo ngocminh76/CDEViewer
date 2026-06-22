@@ -1,31 +1,39 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
-import { Table, Input, Space, Button, Tooltip, Tag, Empty } from 'antd';
+import { Tree, Input, Space, Button, Tooltip, Tag, Empty, Dropdown } from 'antd';
 import {
   EyeOutlined,
   EyeInvisibleOutlined,
   AimOutlined,
   ReloadOutlined,
+  ApartmentOutlined,
+  AppstoreOutlined,
+  FolderOutlined,
 } from '@ant-design/icons';
 import type { TreeNodeData, SelectionInfo } from '../engine.ts';
+import type { TreeProps } from 'antd';
 
 const { Search } = Input;
 
-function filterTreeData(nodes: TreeNodeData[], filter: string): TreeNodeData[] {
-  if (!filter) return nodes;
-  const lowerFilter = filter.toLowerCase();
-  return nodes
-    .map((node) => {
-      const children = node.children ? filterTreeData(node.children, filter) : undefined;
-      const categoryMatches = (node.rawCategory || '').toLowerCase().includes(lowerFilter);
-      const nameMatches = (node.rawName || '').toLowerCase().includes(lowerFilter);
-      const titleMatches = node.title.toLowerCase().includes(lowerFilter);
-      const matches = categoryMatches || nameMatches || titleMatches;
-      const hasMatchingChildren = children && children.length > 0;
-      if (!matches && !hasMatchingChildren) return null;
-      return { ...node, children };
-    })
-    .filter(Boolean) as TreeNodeData[];
+/** Map icon string → Antd icon component with custom colors */
+function getIcon(icon?: string) {
+  switch (icon) {
+    case 'building':
+    case 'storey':
+      return <ApartmentOutlined style={{ color: '#90cdf4', fontSize: '14px' }} />;
+    case 'category':
+      return <FolderOutlined style={{ color: '#f6ad55', fontSize: '14px' }} />;
+    case 'folder':
+    case 'model':
+      return <FolderOutlined style={{ color: '#4fd1c5', fontSize: '14px' }} />;
+    case 'element':
+    case 'wall':
+    case 'slab':
+    case 'column':
+    case 'beam':
+    default:
+      return <AppstoreOutlined style={{ color: '#a0aec0', fontSize: '13px' }} />;
+  }
 }
 
 interface ModelTreeProps {
@@ -33,7 +41,7 @@ interface ModelTreeProps {
   onHighlight?: (modelIdMap: Record<string, Set<number>>) => void;
   onClearHighlight?: () => void;
   onHide?: (modelIdMap: Record<string, Set<number>>) => void;
-  onShow?: (modelIdMap: Record<string, Set<number>>) => void; // Added for active checkbox view
+  onShow?: (modelIdMap: Record<string, Set<number>>) => void;
   onIsolate?: (modelIdMap: Record<string, Set<number>>) => void;
   onShowAll?: () => void;
   onSelectElement?: (modelId: string, localId: number) => void;
@@ -41,19 +49,28 @@ interface ModelTreeProps {
 }
 
 export default function ModelTree({
-  treeData, onHighlight, onClearHighlight, onHide, onShow, onIsolate, onShowAll, onSelectElement, selection,
+  treeData,
+  onHighlight,
+  onClearHighlight,
+  onHide,
+  onShow,
+  onIsolate,
+  onShowAll,
+  onSelectElement,
+  selection,
 }: ModelTreeProps) {
   const [filter, setFilter] = useState('');
   const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
   const [checkedKeys, setCheckedKeys] = useState<string[]>([]);
   const [expandedKeys, setExpandedKeys] = useState<string[]>([]);
 
-  const filteredData = useMemo(() => filterTreeData(treeData, filter), [treeData, filter]);
-
   const nodeMap = useMemo(() => {
     const map = new Map<string, TreeNodeData>();
     function walk(nodes: TreeNodeData[]) {
-      for (const n of nodes) { map.set(n.key, n); if (n.children) walk(n.children); }
+      for (const n of nodes) {
+        map.set(n.key, n);
+        if (n.children) walk(n.children);
+      }
     }
     walk(treeData);
     return map;
@@ -74,7 +91,7 @@ export default function ModelTree({
         }
       }
       collectKeys(treeData);
-      prevCheckedKeys.current = allKeys; // Prevent initial onShow trigger
+      prevCheckedKeys.current = allKeys;
       setCheckedKeys(allKeys);
     }
   }, [treeData]);
@@ -99,7 +116,6 @@ export default function ModelTree({
       return;
     }
     
-    // Find matching node
     let foundNode: TreeNodeData | null = null;
     for (const node of nodeMap.values()) {
       if (node.modelId === selection.modelId && node.localId === selection.localId) {
@@ -131,9 +147,11 @@ export default function ModelTree({
         const merged: Record<string, Set<number>> = {};
         for (const child of node.children) {
           const childMap = getNodeModelIdMap(child.key);
-          if (childMap) for (const [mid, ids] of Object.entries(childMap)) {
-            if (!merged[mid]) merged[mid] = new Set();
-            for (const id of ids) merged[mid].add(id);
+          if (childMap) {
+            for (const [mid, ids] of Object.entries(childMap)) {
+              if (!merged[mid]) merged[mid] = new Set();
+              for (const id of ids) merged[mid].add(id);
+            }
           }
         }
         return Object.keys(merged).length > 0 ? merged : null;
@@ -183,9 +201,13 @@ export default function ModelTree({
     prevCheckedKeys.current = checkedKeys;
   }, [checkedKeys, getNodeModelIdMap, onShow, onHide]);
 
-  const handleRowClick = (record: TreeNodeData) => {
-    setSelectedKeys([record.key]);
+  const handleSelect = (keys: React.Key[]) => {
+    setSelectedKeys(keys as string[]);
+    if (keys.length === 0) return;
     
+    const record = nodeMap.get(keys[0] as string);
+    if (!record) return;
+
     if (record.modelId && record.localId !== undefined) {
       onSelectElement?.(record.modelId, record.localId);
     }
@@ -194,81 +216,108 @@ export default function ModelTree({
     if (map) onHighlight?.(map);
   };
 
+  const handleCheck: TreeProps['onCheck'] = (checked) => {
+    const keys = Array.isArray(checked) ? checked : checked.checked;
+    setCheckedKeys(keys as string[]);
+  };
+
   const getCheckedModelIdMap = useCallback((): Record<string, Set<number>> | null => {
     if (checkedKeys.length === 0) return null;
     const merged: Record<string, Set<number>> = {};
     for (const key of checkedKeys) {
       const map = getNodeModelIdMap(key);
-      if (map) for (const [mid, ids] of Object.entries(map)) {
-        if (!merged[mid]) merged[mid] = new Set();
-        for (const id of ids) merged[mid].add(id);
+      if (map) {
+        for (const [mid, ids] of Object.entries(map)) {
+          if (!merged[mid]) merged[mid] = new Set();
+          for (const id of ids) merged[mid].add(id);
+        }
       }
     }
     return Object.keys(merged).length > 0 ? merged : null;
   }, [checkedKeys, getNodeModelIdMap]);
 
-  const columns = [
-    {
-      title: 'Type',
-      dataIndex: 'rawCategory',
-      key: 'type',
-      width: '35%',
-      render: (text: string, record: TreeNodeData) => {
-        return (
-          <span style={{ 
-            fontSize: '12px', 
-            fontWeight: record.children ? 600 : 400, 
-            color: record.children ? '#cbd5e0' : '#e2e8f0',
-            verticalAlign: 'middle' 
-          }}>
-            {record.rawCategory || ''}
-          </span>
-        );
-      }
+  // Context menu layout on right-click
+  const contextMenu = useCallback(
+    (key: string) => ({
+      items: [
+        { key: 'isolate', label: '🎯 Cô lập cấu kiện', icon: <AimOutlined /> },
+        { key: 'hide', label: '👁️ Ẩn cấu kiện', icon: <EyeInvisibleOutlined /> },
+        { key: 'show', label: '👁️ Chỉ hiển thị cấu kiện này', icon: <EyeOutlined /> },
+      ],
+      onClick: ({ key: action }: { key: string }) => {
+        const map = getNodeModelIdMap(key);
+        if (!map) return;
+        if (action === 'isolate') {
+          onIsolate?.(map);
+        } else if (action === 'hide') {
+          onHide?.(map);
+          // Sync check state in Tree: remove keys corresponding to hidden items
+          setCheckedKeys(prev => prev.filter(k => k !== key));
+        } else if (action === 'show') {
+          onShowAll?.();
+          onHighlight?.(map);
+        }
+      },
+    }),
+    [getNodeModelIdMap, onIsolate, onHide, onShowAll, onHighlight],
+  );
+
+  // Recursively maps tree data structure to Ant Design format, applying context menu and filter
+  const mapNodesToTreeData = useCallback(
+    (nodes: TreeNodeData[], search: string): TreeProps['treeData'] => {
+      const lower = search.toLowerCase();
+      return nodes
+        .map((node) => {
+          const children = node.children
+            ? mapNodesToTreeData(node.children, search)
+            : undefined;
+
+          const titleMatches = node.title.toLowerCase().includes(lower);
+          const categoryMatches = (node.rawCategory || '').toLowerCase().includes(lower);
+          const nameMatches = (node.rawName || '').toLowerCase().includes(lower);
+          const matches = titleMatches || categoryMatches || nameMatches;
+          const hasMatchingChildren = children && children.length > 0;
+
+          if (!matches && !hasMatchingChildren && lower) return null;
+
+          const isLeaf = !node.children;
+
+          const titleElement = (
+            <Dropdown menu={contextMenu(node.key)} trigger={['contextMenu']}>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                <span style={{ 
+                  fontSize: isLeaf ? '12px' : '13px', 
+                  fontWeight: isLeaf ? 400 : 600, 
+                  color: isLeaf ? '#e2e8f0' : '#cbd5e0',
+                  userSelect: 'none'
+                }}>
+                  {node.title}
+                </span>
+                {node.rawCategory && node.rawCategory !== node.title && (
+                  <Tag style={{ fontSize: '9px', padding: '0 4px', margin: 0, background: 'rgba(107, 70, 193, 0.2)', borderColor: 'rgba(107, 70, 193, 0.4)', color: '#d6bcfa', border: '1px solid' }}>
+                    {node.rawCategory}
+                  </Tag>
+                )}
+              </span>
+            </Dropdown>
+          );
+
+          return {
+            key: node.key,
+            title: titleElement,
+            icon: getIcon(node.icon),
+            children: children && children.length > 0 ? children : undefined,
+          };
+        })
+        .filter(Boolean) as TreeProps['treeData'];
     },
-    {
-      title: 'Name',
-      dataIndex: 'rawName',
-      key: 'name',
-      width: '35%',
-      render: (text: string, record: TreeNodeData) => {
-        const isLeaf = !record.children;
-        return (
-          <span style={{ 
-            fontSize: '11px', 
-            color: isLeaf ? '#e2e8f0' : '#cbd5e0', 
-            fontWeight: isLeaf ? 500 : 600,
-            display: 'block',
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            whiteSpace: 'nowrap',
-          }}>
-            {record.rawName || (record.localId !== undefined ? `#${record.localId}` : '')}
-          </span>
-        );
-      }
-    },
-    {
-      title: 'Description',
-      dataIndex: 'description',
-      key: 'description',
-      width: '30%',
-      render: (text: string, record: TreeNodeData) => {
-        return (
-          <span style={{ 
-            fontSize: '11px', 
-            color: '#a0aec0',
-            display: 'block',
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            whiteSpace: 'nowrap',
-          }}>
-            {record.description || ''}
-          </span>
-        );
-      }
-    }
-  ];
+    [contextMenu],
+  );
+
+  const filteredTreeData = useMemo(
+    () => mapNodesToTreeData(treeData, filter),
+    [treeData, filter, mapNodesToTreeData],
+  );
 
   if (treeData.length === 0) {
     return <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="No model loaded" style={{ padding: '20px 0' }} />;
@@ -276,7 +325,7 @@ export default function ModelTree({
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      <Search placeholder="Filter..." allowClear size="small" onChange={(e) => setFilter(e.target.value)} style={{ marginBottom: 8 }} />
+      <Search placeholder="Filter tree..." allowClear size="small" onChange={(e) => setFilter(e.target.value)} style={{ marginBottom: 8 }} />
       <Space size={4} style={{ marginBottom: 8 }} wrap>
         <Tooltip title="Hide checked"><Button size="small" icon={<EyeInvisibleOutlined />} disabled={checkedKeys.length === 0} onClick={() => { const m = getCheckedModelIdMap(); if (m) onHide?.(m); }} /></Tooltip>
         <Tooltip title="Isolate checked"><Button size="small" icon={<AimOutlined />} disabled={checkedKeys.length === 0} onClick={() => { const m = getCheckedModelIdMap(); if (m) onIsolate?.(m); }} /></Tooltip>
@@ -302,34 +351,19 @@ export default function ModelTree({
         {checkedKeys.length > 0 && <Tag color="blue">{checkedKeys.length} checked</Tag>}
       </Space>
       <div style={{ flex: 1, overflow: 'auto' }}>
-        <Table
-          key={treeData.length > 0 ? treeData[0].key : 'empty'}
-          dataSource={filteredData}
-          columns={columns}
-          size="small"
-          pagination={false}
-          rowSelection={{
-            type: 'checkbox',
-            columnTitle: <span style={{ fontSize: 10, fontWeight: 600, color: '#a0aec0' }}>Active</span>,
-            selectedRowKeys: checkedKeys,
-            onChange: (keys) => setCheckedKeys(keys as string[]),
-            checkStrictly: false,
-          }}
-          expandable={{
-            expandedRowKeys: expandedKeys,
-            onExpandedRowsChange: (keys) => setExpandedKeys(keys as string[]),
-            expandIconColumnIndex: 1,
-          }}
-          bordered
-          rowKey="key"
-          onRow={(record) => ({
-            onClick: (e) => {
-              if ((e.target as HTMLElement).closest('.ant-table-selection-column')) return;
-              handleRowClick(record);
-            },
-          })}
-          rowClassName={(record) => selectedKeys.includes(record.key) ? 'ant-table-row-selected' : ''}
-          className="ifc-structure-table"
+        <Tree
+          checkable
+          showIcon
+          showLine={{ showLeafIcon: false }}
+          defaultExpandedKeys={treeData.map((n) => n.key)}
+          expandedKeys={expandedKeys}
+          onExpand={(keys) => setExpandedKeys(keys as string[])}
+          checkedKeys={checkedKeys}
+          selectedKeys={selectedKeys}
+          onCheck={handleCheck}
+          onSelect={handleSelect}
+          treeData={filteredTreeData}
+          className="ifc-structure-tree"
         />
       </div>
     </div>

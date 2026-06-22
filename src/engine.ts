@@ -634,9 +634,21 @@ export async function createBimEngine(
    */
   async function zoomToFit() {
     if (mapBoxComponent.enabled && mapBoxComponent.map) {
-      console.log(`[zoomToFit] Mapbox enabled. Flying to center: ${JSON.stringify(mapBoxComponent.coord.center)}`);
+      const currentCenter = mapBoxComponent.map.getCenter();
+      const targetCenter = mapBoxComponent.coord.center;
+      const dist = Math.sqrt(
+        Math.pow(currentCenter.lng - targetCenter[0], 2) +
+        Math.pow(currentCenter.lat - targetCenter[1], 2)
+      );
+      // Nếu camera đã ở rất gần tâm (dưới ~11m), bỏ qua flyTo để tránh giật hình/xung đột hoạt ảnh camera
+      if (dist < 0.0001) {
+        console.log(`[zoomToFit] Mapbox camera is already near target center (${dist.toFixed(6)}). Skipping redundant flyTo.`);
+        return;
+      }
+
+      console.log(`[zoomToFit] Mapbox enabled. Flying to center: ${JSON.stringify(targetCenter)}`);
       mapBoxComponent.map.flyTo({
-        center: mapBoxComponent.coord.center,
+        center: targetCenter,
         zoom: 18,
         essential: true
       });

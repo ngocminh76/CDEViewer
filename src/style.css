@@ -270,3 +270,55 @@ canvas {
 .svg-blueprint-content:active {
   cursor: grabbing;
 }
+
+/* Ant Design Tree custom styling for BIM structure */
+.ifc-structure-tree {
+  background: transparent !important;
+  color: #cbd5e0 !important;
+  font-family: inherit;
+}
+
+.ifc-structure-tree .ant-tree-node-content-wrapper {
+  transition: all 0.2s ease;
+  padding: 4px 6px !important;
+  border-radius: 4px;
+}
+
+.ifc-structure-tree .ant-tree-node-content-wrapper:hover {
+  background: rgba(255, 255, 255, 0.05) !important;
+  color: #fff !important;
+}
+
+.ifc-structure-tree .ant-tree-node-selected {
+  background: rgba(24, 144, 255, 0.22) !important;
+  border-left: 2px solid #1890ff;
+  border-radius: 0 4px 4px 0;
+  color: #fff !important;
+}
+
+.ifc-structure-tree .ant-tree-checkbox-inner {
+  background-color: transparent !important;
+  border-color: rgba(255, 255, 255, 0.3) !important;
+}
+
+.ifc-structure-tree .ant-tree-checkbox-checked .ant-tree-checkbox-inner {
+  background-color: #1890ff !important;
+  border-color: #1890ff !important;
+}
+
+.ifc-structure-tree .ant-tree-indent-unit {
+  width: 16px !important;
+}
+
+.ifc-structure-tree .ant-tree-switcher {
+  background: transparent !important;
+  color: #a0aec0 !important;
+  width: 18px !important;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.ifc-structure-tree .ant-tree-switcher:hover {
+  color: #1890ff !important;
+}

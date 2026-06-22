@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react';
-import { Descriptions, Collapse, Table, Tag, Empty, Typography, Card, InputNumber, Button, Select, Radio, Alert, Tabs, Slider } from 'antd';
+import { Descriptions, Table, Tag, Empty, Typography, Card, Tabs, Slider, InputNumber, Button, Select, Radio, Alert } from 'antd';
 import type { SelectionInfo, PropertySet } from '../engine.ts';
 import { vn2000ToWgs84 } from '../utils/coordination.ts';
 import { VN2000_PROVINCES } from '../utils/vn2000-provinces.ts';
+
 
 const { Text } = Typography;
 
@@ -82,17 +83,114 @@ export default function RightPanel({
 
   useEffect(() => {
     setLocalKtt(ktt);
-    // Auto-detect if KTT matches a province, otherwise show custom
-    const matchedProvince = VN2000_PROVINCES.find(p => p.ktt === ktt);
-    if (matchedProvince) {
-      setSelectedProvince(matchedProvince.name);
+    
+    // Check if the current selected province or custom value already matches the incoming ktt.
+    // If it does, do not auto-detect again to prevent resetting the user's choice.
+    if (selectedProvince === 'custom' && showCustomKtt && Math.abs(customKttVal - ktt) < 0.001) {
+      return;
+    }
+    if (selectedProvince && selectedProvince !== 'custom') {
+      const currentProvince = VN2000_PROVINCES.find(p => p.name === selectedProvince);
+      if (currentProvince && Math.abs(currentProvince.ktt - ktt) < 0.001) {
+        return;
+      }
+    }
+
+    const propLat = mapboxCenter[1];
+
+    // Auto-detect if KTT matches a province, prioritizing closest latitude to prevent North-South mismatch
+    const matchingProvinces = VN2000_PROVINCES.filter(p => Math.abs(p.ktt - ktt) < 0.01);
+    if (matchingProvinces.length > 0) {
+      const provinceLatitudes: Record<string, number> = {
+        // Múi 103.00
+        'Lai Châu': 22.3,
+        'Điện Biên': 21.4,
+        // Múi 104.00
+        'Sơn La': 21.2,
+        // Múi 104.75
+        'Lào Cai': 22.4,
+        'Yên Bái': 21.7,
+        'Phú Thọ': 21.3,
+        'Nghệ An': 19.3,
+        'An Giang': 10.5,
+        // Múi 105.00
+        'Vĩnh Phúc': 21.3,
+        'Hà Nội': 21.0,
+        'Hà Nam': 20.5,
+        'Ninh Bình': 20.2,
+        'Thanh Hóa': 20.0,
+        'Đồng Tháp': 10.5,
+        'Cần Thơ': 10.0,
+        'Hậu Giang': 9.8,
+        'Bạc Liêu': 9.3,
+        // Múi 105.50
+        'Hà Giang': 22.8,
+        'Sóc Trăng': 9.6,
+        'Trà Vinh': 9.7,
+        'Vĩnh Long': 10.2,
+        'Bắc Ninh': 21.1,
+        'Hải Dương': 20.9,
+        'Hưng Yên': 20.8,
+        'Nam Định': 20.4,
+        'Thái Bình': 20.4,
+        'Hà Tĩnh': 18.3,
+        'Tây Ninh': 11.3,
+        // Múi 105.75
+        'Bình Dương': 11.0,
+        'Long An': 10.7,
+        'Tiền Giang': 10.4,
+        'Bến Tre': 10.2,
+        'Hồ Chí Minh': 10.8,
+        // Múi 106.00
+        'Tuyên Quang': 21.8,
+        'Hòa Bình': 20.7,
+        'Quảng Bình': 17.5,
+        // Múi 106.25
+        'Quảng Trị': 16.7,
+        'Bình Phước': 11.7,
+        // Múi 106.50
+        'Bắc Kạn': 22.3,
+        'Thái Nguyên': 21.6,
+        // Múi 107.00
+        'Bắc Giang': 21.3,
+        'Thừa Thiên Huế': 16.3,
+        // Múi 107.75
+        'Quảng Ninh': 21.0,
+        'Đà Nẵng': 16.0,
+        'Quảng Nam': 15.7,
+        'Lâm Đồng': 11.8,
+        'Đồng Nai': 11.0,
+        'Bà Rịa – Vũng Tàu': 10.5,
+        // Múi 108.25
+        'Bình Định': 14.1,
+        'Khánh Hòa': 12.3,
+        'Ninh Thuận': 11.7,
+        // Múi 108.50
+        'Gia Lai': 13.8,
+        'Đắk Lắk': 12.7,
+        'Đắk Nông': 12.1,
+        'Phú Yên': 13.1,
+        'Bình Thuận': 11.1
+      };
+      
+      let bestMatch = matchingProvinces[0];
+      let minLatDiff = Math.abs((provinceLatitudes[bestMatch.name] || 16.0) - propLat);
+      for (const p of matchingProvinces) {
+        const pLat = provinceLatitudes[p.name] || 16.0;
+        const diff = Math.abs(pLat - propLat);
+        if (diff < minLatDiff) {
+          minLatDiff = diff;
+          bestMatch = p;
+        }
+      }
+      setSelectedProvince(bestMatch.name);
       setShowCustomKtt(false);
     } else {
       setSelectedProvince('custom');
       setShowCustomKtt(true);
       setCustomKttVal(ktt);
     }
-  }, [ktt]);
+  }, [ktt, mapboxCenter]);
 
   useEffect(() => {
     setLocalZone3deg(zone3deg);
@@ -114,7 +212,7 @@ export default function RightPanel({
   useEffect(() => {
     if (localRawX !== null && localRawY !== null) {
       const activeKtt = showCustomKtt ? customKttVal : localKtt;
-      const [newLng, newLat] = vn2000ToWgs84(localRawX, localRawY, activeKtt, localZone3deg);
+      const [newLng, newLat] = vn2000ToWgs84(localRawX, localRawY, activeKtt, localZone3deg, localRawZ || 0);
       setLng(newLng);
       setLat(newLat);
       if (localRawZ !== null) {
@@ -146,46 +244,6 @@ export default function RightPanel({
     setElevation(val);
     onUpdateParams({ elevation: val });
   };
-
-  const renderMapCameraCard = () => (
-    <Card
-      title="🎥 Điều khiển Camera Bản đồ"
-      size="small"
-      style={{ marginBottom: 12, background: '#1f1f2e', borderColor: '#303050' }}
-    >
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-        {/* Pitch (Góc nghiêng) */}
-        <div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 2 }}>
-            <span style={{ fontSize: 11, color: '#aaa' }}>Góc nghiêng camera (Pitch):</span>
-            <span style={{ fontSize: 11, color: '#1890ff', fontWeight: 'bold' }}>{Math.round(mapboxPitch)}°</span>
-          </div>
-          <Slider
-            min={0}
-            max={85}
-            value={mapboxPitch}
-            onChange={(v) => onUpdatePitch(v)}
-            tooltip={{ formatter: (v) => `${v}°` }}
-          />
-        </div>
-
-        {/* Bearing (Hướng xoay) */}
-        <div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 2 }}>
-            <span style={{ fontSize: 11, color: '#aaa' }}>Hướng xoay bản đồ (Bearing):</span>
-            <span style={{ fontSize: 11, color: '#1890ff', fontWeight: 'bold' }}>{Math.round(mapboxBearing)}°</span>
-          </div>
-          <Slider
-            min={0}
-            max={360}
-            value={mapboxBearing}
-            onChange={(v) => onUpdateBearing(v)}
-            tooltip={{ formatter: (v) => `${v}°` }}
-          />
-        </div>
-      </div>
-    </Card>
-  );
 
   const handleKttSelectChange = (val: string) => {
     setSelectedProvince(val);
@@ -282,7 +340,7 @@ export default function RightPanel({
               value={customKttVal}
               onChange={(v) => v !== null && setCustomKttVal(v)}
               style={{ width: '100%' }}
-              step={0.1}
+              step={0.01}
               precision={2}
               placeholder="Nhập KTT của dự án..."
             />
@@ -372,6 +430,47 @@ export default function RightPanel({
       </div>
     </Card>
   );
+
+  const renderMapCameraCard = () => (
+    <Card
+      title="🎥 Điều khiển Camera Bản đồ"
+      size="small"
+      style={{ marginBottom: 12, background: '#1f1f2e', borderColor: '#303050' }}
+    >
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        {/* Pitch (Góc nghiêng) */}
+        <div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 2 }}>
+            <span style={{ fontSize: 11, color: '#aaa' }}>Góc nghiêng camera (Pitch):</span>
+            <span style={{ fontSize: 11, color: '#1890ff', fontWeight: 'bold' }}>{Math.round(mapboxPitch)}°</span>
+          </div>
+          <Slider
+            min={0}
+            max={85}
+            value={mapboxPitch}
+            onChange={(v) => onUpdatePitch(v)}
+            tooltip={{ formatter: (v) => `${v}°` }}
+          />
+        </div>
+
+        {/* Bearing (Hướng xoay) */}
+        <div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 2 }}>
+            <span style={{ fontSize: 11, color: '#aaa' }}>Hướng xoay bản đồ (Bearing):</span>
+            <span style={{ fontSize: 11, color: '#1890ff', fontWeight: 'bold' }}>{Math.round(mapboxBearing)}°</span>
+          </div>
+          <Slider
+            min={0}
+            max={360}
+            value={mapboxBearing}
+            onChange={(v) => onUpdateBearing(v)}
+            tooltip={{ formatter: (v) => `${v}°` }}
+          />
+        </div>
+      </div>
+    </Card>
+  );
+
 
   if (!selection) {
     if (mapboxEnabled) {
