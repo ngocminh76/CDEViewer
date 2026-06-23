@@ -81,7 +81,21 @@ export default function ModelTree({
   // Expand top levels and check all keys when treeData loads
   useEffect(() => {
     if (treeData.length > 0) {
-      setExpandedKeys(treeData.map((n) => n.key));
+      // Collect all keys down to storey level (Project, Site, Building, Storey, Model)
+      const keysToExpand: string[] = [];
+      function collectSpatialKeys(nodes: TreeNodeData[]) {
+        for (const n of nodes) {
+          const isSpatial = n.icon === 'building' || n.icon === 'folder' || n.icon === 'storey' || n.icon === 'model';
+          if (isSpatial) {
+            keysToExpand.push(n.key);
+            if (n.children) {
+              collectSpatialKeys(n.children);
+            }
+          }
+        }
+      }
+      collectSpatialKeys(treeData);
+      setExpandedKeys(keysToExpand);
       
       const allKeys: string[] = [];
       function collectKeys(nodes: TreeNodeData[]) {

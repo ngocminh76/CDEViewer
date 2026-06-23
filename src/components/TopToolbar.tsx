@@ -60,9 +60,9 @@ export default function TopToolbar({
             </Tooltip>
           </Space>
         )}
-        <Upload accept=".ifc" showUploadList={false} beforeUpload={(file) => { onUpload?.(file); return false; }}>
-          <Tooltip title="Load IFC file">
-            <Button type="text" icon={<UploadOutlined />} style={{ color: '#fff' }}>Load IFC</Button>
+        <Upload accept=".ifc,.frag" showUploadList={false} beforeUpload={(file) => { onUpload?.(file); return false; }}>
+          <Tooltip title="Load IFC or FRAG file">
+            <Button type="text" icon={<UploadOutlined />} style={{ color: '#fff' }}>Load IFC/FRAG</Button>
           </Tooltip>
         </Upload>
         <Text type="secondary" style={{ fontSize: 12 }}>{status}</Text>

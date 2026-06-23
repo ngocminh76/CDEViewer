@@ -479,7 +479,7 @@ export async function createBimEngine(
         const childCat = String(child.type || child.Type || child.category || '').toUpperCase();
         
         const isDuplicate = (childId !== undefined && childId !== null && childId === parentId);
-        const isRelation = childCat.startsWith('IFCREL') || childCat === 'IFCUNKNOWN' || !childCat;
+        const isRelation = childCat.startsWith('IFCREL') || childCat === 'IFCUNKNOWN';
         
         if (isDuplicate || isRelation) {
           if (Array.isArray(child.children)) {
@@ -498,6 +498,7 @@ export async function createBimEngine(
     return node;
   }
 
+
   async function buildTreeData(): Promise<TreeNodeData[]> {
     const roots: TreeNodeData[] = [];
     
@@ -509,7 +510,7 @@ export async function createBimEngine(
           const flattened = flattenSpatialTree(spatialTree);
           console.log("=== FLATTENED TREE ===", JSON.stringify(flattened, null, 2));
           const modelExpressIDs = new Set<number>(await model.getItemsIds());
-          const rootNode = buildSpatialNode(flattened, model, modelId, modelExpressIDs);
+          const rootNode = await buildSpatialNode(flattened, model, modelId, modelExpressIDs);
           if (rootNode) {
             roots.push(rootNode);
           }
@@ -925,12 +926,13 @@ function hasGeometry(node: any, expressIds: Set<number>): boolean {
   return false;
 }
 
-function buildSpatialNode(
+async function buildSpatialNode(
   item: any,
   model: any,
   modelId: string,
   modelExpressIDs: Set<number>,
-): TreeNodeData | null {
+  isParentSpatial: boolean = true,
+): Promise<TreeNodeData | null> {
   if (!item) return null;
   
   const localId = (item.expressID !== undefined && item.expressID !== null)
@@ -939,14 +941,36 @@ function buildSpatialNode(
 
   const category = item.type || item.Type || item.category || '';
   const catUpper = category.toUpperCase();
+  const isSpatialCategory = catUpper.includes('PROJECT') || catUpper.includes('SITE') || catUpper.includes('BUILDING') || catUpper.includes('STOREY');
   
   let name = '';
   let description = '';
-  if (localId !== null && model.properties) {
-    const entity = model.properties[localId];
-    if (entity) {
-      name = unwrap(entity.LongName) || unwrap(entity.Name) || unwrap(entity.ObjectType) || '';
-      description = unwrap(entity.Description) || '';
+  if (localId !== null) {
+    if (model.properties) {
+      const entity = model.properties[localId];
+      if (entity) {
+        name = unwrap(entity.LongName) || unwrap(entity.Name) || unwrap(entity.ObjectType) || '';
+        description = unwrap(entity.Description) || '';
+      }
+    }
+    // Only call getAttributes asynchronously for spatial containers (Project, Site, Building, Storey)
+    // to avoid performance freeze on thousands of physical elements.
+    if (!name && isParentSpatial) {
+      try {
+        const attrs = await model.getItem(localId).getAttributes();
+        if (attrs) {
+          if (typeof attrs.getValue === 'function') {
+            name = String(attrs.getValue("LongName") || attrs.getValue("Name") || attrs.getValue("ObjectType") || '');
+            const descVal = attrs.getValue("Description");
+            if (descVal) description = String(descVal);
+          } else {
+            name = String((attrs as any).LongName || (attrs as any).Name || (attrs as any).ObjectType || '');
+            if ((attrs as any).Description) description = String((attrs as any).Description);
+          }
+        }
+      } catch (e) {
+        // ignore
+      }
     }
   }
   
@@ -956,75 +980,16 @@ function buildSpatialNode(
   if (name) {
     title = name;
   } else {
-    title = localId !== null ? `#${localId}` : formattedCategory;
+    title = formattedCategory || category;
   }
   
   const children: TreeNodeData[] = [];
   
   if (item.children) {
-    const isSpatial = catUpper === 'IFCPROJECT' || catUpper === 'IFCSITE' || catUpper === 'IFCBUILDING' || catUpper === 'IFCBUILDINGSTOREY' || catUpper === 'IFCSPACE' || catUpper === '';
-    
-    if (isSpatial) {
-      const spatialChildren: any[] = [];
-      const physicalChildren: any[] = [];
-      
-      for (const child of item.children) {
-        const childCat = String(child.type || child.Type || child.category || '').toUpperCase();
-        if (childCat === 'IFCPROJECT' || childCat === 'IFCSITE' || childCat === 'IFCBUILDING' || childCat === 'IFCBUILDINGSTOREY' || childCat === 'IFCSPACE') {
-          spatialChildren.push(child);
-        } else {
-          physicalChildren.push(child);
-        }
-      }
-      
-      for (const child of spatialChildren) {
-        const childNode = buildSpatialNode(child, model, modelId, modelExpressIDs);
-        if (childNode) children.push(childNode);
-      }
-      
-      if (physicalChildren.length > 0) {
-        const groups = new Map<string, any[]>();
-        for (const child of physicalChildren) {
-          const cat = child.type || child.Type || child.category || 'Unknown';
-          if (!groups.has(cat)) groups.set(cat, []);
-          groups.get(cat)!.push(child);
-        }
-        
-        for (const [cat, items] of groups.entries()) {
-          const folderChildren: TreeNodeData[] = [];
-          for (const child of items) {
-            const childNode = buildSpatialNode(child, model, modelId, modelExpressIDs);
-            if (childNode) folderChildren.push(childNode);
-          }
-          
-          const pluralCategory = getPluralCategoryName(cat);
-          const folderModelIdMap: Record<string, Set<number>> = {};
-          for (const childNode of folderChildren) {
-            if (childNode.modelIdMap) {
-              for (const [mid, ids] of Object.entries(childNode.modelIdMap)) {
-                if (!folderModelIdMap[mid]) folderModelIdMap[mid] = new Set();
-                for (const id of ids) folderModelIdMap[mid].add(id);
-              }
-            }
-          }
-          
-          children.push({
-            key: `group-folder-${modelId}-${cat}-${Math.random()}`,
-            title: pluralCategory,
-            icon: 'category',
-            children: folderChildren,
-            modelIdMap: Object.keys(folderModelIdMap).length > 0 ? folderModelIdMap : undefined,
-            rawCategory: pluralCategory,
-            rawName: '',
-          });
-        }
-      }
-    } else {
-      // Non-spatial elements (like physical instances, type objects, material layers): list all child items directly
-      for (const child of item.children) {
-        const childNode = buildSpatialNode(child, model, modelId, modelExpressIDs);
-        if (childNode) children.push(childNode);
-      }
+    for (const child of item.children) {
+      const passSpatial = category ? isSpatialCategory : isParentSpatial;
+      const childNode = await buildSpatialNode(child, model, modelId, modelExpressIDs, passSpatial);
+      if (childNode) children.push(childNode);
     }
   }
   
@@ -1695,14 +1660,21 @@ export async function loadIfcFile(
 ): Promise<string> {
   onStatus?.(`Loading: ${file.name}...`);
   const buf = await file.arrayBuffer();
-  const modelId = file.name.replace(/\.ifc$/i, '');
-  await engine.ifcLoader.load(new Uint8Array(buf), true, modelId, {
-    processData: {
-      progressCallback: (p: number) => {
-        onStatus?.(`Loading: ${file.name} (${Math.round(p * 100)}%)`);
+  const isFrag = file.name.toLowerCase().endsWith('.frag');
+  const modelId = file.name.replace(/\.(ifc|frag)$/i, '');
+
+  if (isFrag) {
+    await engine.fragments.core.load(new Uint8Array(buf), { modelId });
+  } else {
+    await engine.ifcLoader.load(new Uint8Array(buf), true, modelId, {
+      processData: {
+        progressCallback: (p: number) => {
+          onStatus?.(`Loading: ${file.name} (${Math.round(p * 100)}%)`);
+        },
       },
-    },
-  });
+    });
+  }
+
   onStatus?.('Classifying...');
   await engine.classifier.byIfcBuildingStorey();
   await engine.classifier.byCategory();
