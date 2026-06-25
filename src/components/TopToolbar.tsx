@@ -16,7 +16,7 @@ interface TopToolbarProps {
   rightCollapsed: boolean;
   onToggleRight: () => void;
   status: string;
-  onUpload?: (file: File) => void;
+  onUploads?: (files: File[]) => void;
   username?: string;
   onLogout?: () => void;
 }
@@ -27,7 +27,7 @@ export default function TopToolbar({
   rightCollapsed,
   onToggleRight,
   status,
-  onUpload,
+  onUploads,
   username,
   onLogout,
 }: TopToolbarProps) {
@@ -60,9 +60,19 @@ export default function TopToolbar({
             </Tooltip>
           </Space>
         )}
-        <Upload accept=".ifc,.frag" showUploadList={false} beforeUpload={(file) => { onUpload?.(file); return false; }}>
-          <Tooltip title="Load IFC or FRAG file">
-            <Button type="text" icon={<UploadOutlined />} style={{ color: '#fff' }}>Load IFC/FRAG</Button>
+        <Upload
+          accept=".ifc,.frag,.obj,.fbx,.gltf,.glb"
+          multiple={true}
+          showUploadList={false}
+          beforeUpload={(file, fileList) => {
+            if (file === fileList[0]) {
+              onUploads?.(fileList);
+            }
+            return false;
+          }}
+        >
+          <Tooltip title="Load IFC, FRAG, FBX, OBJ, or glTF files">
+            <Button type="text" icon={<UploadOutlined />} style={{ color: '#fff' }}>Load Models</Button>
           </Tooltip>
         </Upload>
         <Text type="secondary" style={{ fontSize: 12 }}>{status}</Text>

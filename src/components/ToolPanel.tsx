@@ -13,6 +13,8 @@ import {
   SelectOutlined,
   GlobalOutlined,
   FileImageOutlined,
+  EyeOutlined,
+  EyeInvisibleOutlined,
 } from '@ant-design/icons';
 import type { ToolMode } from '../engine.ts';
 
@@ -28,6 +30,8 @@ interface ToolPanelProps {
   onToggleMapbox: () => void;
   docOpen: boolean;
   onToggleDoc: () => void;
+  hideUnderground: boolean;
+  onToggleHideUnderground: () => void;
 }
 
 export default function ToolPanel({
@@ -42,6 +46,8 @@ export default function ToolPanel({
   onToggleMapbox,
   docOpen,
   onToggleDoc,
+  hideUnderground,
+  onToggleHideUnderground,
 }: ToolPanelProps) {
   return (
     <div
@@ -88,6 +94,18 @@ export default function ToolPanel({
             onClick={onToggleMapbox}
           />
         </Tooltip>
+
+        {mapboxEnabled && (
+          <Tooltip title={hideUnderground ? "Hiển thị toàn bộ mô hình (Show All)" : "Ẩn phần dưới mặt đất (Hide Underground)"}>
+            <Button
+              shape="circle"
+              type={hideUnderground ? 'primary' : 'text'}
+              style={{ color: hideUnderground ? '#fff' : '#cbd5e0' }}
+              icon={hideUnderground ? <EyeInvisibleOutlined style={{ fontSize: 16 }} /> : <EyeOutlined style={{ fontSize: 16 }} />}
+              onClick={onToggleHideUnderground}
+            />
+          </Tooltip>
+        )}
         
         <Tooltip title="Mở Bản vẽ Kỹ thuật 2D">
           <Button

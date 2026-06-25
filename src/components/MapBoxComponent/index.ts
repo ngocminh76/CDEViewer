@@ -54,6 +54,8 @@ export class MapBoxComponent
   renderer!: THREE.WebGLRenderer;
   labelRenderer: CSS2DRenderer = new CSS2DRenderer();
   readonly scene: THREE.Scene = new THREE.Scene();
+  clippingPlanes: THREE.Plane[] = [];
+
 
   constructor(components: OBC.Components) {
     super(components);
@@ -251,6 +253,7 @@ export class MapBoxComponent
       console.log(`[MapBox DEBUG] camera projection matrix elements:`, Array.from(this.camera.projectionMatrix.elements).map(n => Number(n.toFixed(6))));
     }
 
+    this.renderer.clippingPlanes = this.clippingPlanes;
     this.renderer.resetState();
     
     try {

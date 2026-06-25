@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Descriptions, Table, Tag, Empty, Typography, Card, Tabs, Slider, InputNumber, Button, Select, Radio, Alert } from 'antd';
+import { Descriptions, Table, Tag, Empty, Typography, Card, Tabs, Slider, InputNumber, Button, Select, Radio, Alert, Switch } from 'antd';
 import type { SelectionInfo, PropertySet } from '../engine.ts';
 import { vn2000ToWgs84 } from '../utils/coordination.ts';
 import { VN2000_PROVINCES } from '../utils/vn2000-provinces.ts';
@@ -29,9 +29,11 @@ interface RightPanelProps {
     rawX?: number | null;
     rawY?: number | null;
     rawZ?: number | null;
+    hideUnderground?: boolean;
   }) => void;
   onUpdatePitch: (pitch: number) => void;
   onUpdateBearing: (bearing: number) => void;
+  hideUnderground: boolean;
 }
 
 export default function RightPanel({
@@ -50,6 +52,7 @@ export default function RightPanel({
   onUpdateParams,
   onUpdatePitch,
   onUpdateBearing,
+  hideUnderground,
 }: RightPanelProps) {
   const [lng, setLng] = useState(mapboxCenter[0]);
   const [lat, setLat] = useState(mapboxCenter[1]);
@@ -465,6 +468,17 @@ export default function RightPanel({
             value={mapboxBearing}
             onChange={(v) => onUpdateBearing(v)}
             tooltip={{ formatter: (v) => `${v}°` }}
+          />
+        </div>
+
+        <hr style={{ border: 'none', borderTop: '1px solid #303040', margin: '4px 0' }} />
+
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <span style={{ fontSize: 11, color: '#aaa' }}>Ẩn phần dưới mặt đất (Hide Underground):</span>
+          <Switch
+            checked={hideUnderground}
+            onChange={(checked) => onUpdateParams({ hideUnderground: checked })}
+            size="small"
           />
         </div>
       </div>

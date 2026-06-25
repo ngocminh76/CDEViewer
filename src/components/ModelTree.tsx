@@ -96,7 +96,7 @@ export default function ModelTree({
       }
       collectSpatialKeys(treeData);
       setExpandedKeys(keysToExpand);
-      
+
       const allKeys: string[] = [];
       function collectKeys(nodes: TreeNodeData[]) {
         for (const n of nodes) {
@@ -129,7 +129,7 @@ export default function ModelTree({
       setSelectedKeys([]);
       return;
     }
-    
+
     let foundNode: TreeNodeData | null = null;
     for (const node of nodeMap.values()) {
       if (node.modelId === selection.modelId && node.localId === selection.localId) {
@@ -137,10 +137,10 @@ export default function ModelTree({
         break;
       }
     }
-    
+
     if (foundNode) {
       setSelectedKeys([foundNode.key]);
-      
+
       const newExpandedKeys = new Set(expandedKeys);
       const path: string[] = [];
       if (getParentKeys(treeData, foundNode.key, path)) {
@@ -218,14 +218,14 @@ export default function ModelTree({
   const handleSelect = (keys: React.Key[]) => {
     setSelectedKeys(keys as string[]);
     if (keys.length === 0) return;
-    
+
     const record = nodeMap.get(keys[0] as string);
     if (!record) return;
 
     if (record.modelId && record.localId !== undefined) {
       onSelectElement?.(record.modelId, record.localId);
     }
-    
+
     const map = getNodeModelIdMap(record.key);
     if (map) onHighlight?.(map);
   };
@@ -299,9 +299,9 @@ export default function ModelTree({
           const titleElement = (
             <Dropdown menu={contextMenu(node.key)} trigger={['contextMenu']}>
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                <span style={{ 
-                  fontSize: isLeaf ? '12px' : '13px', 
-                  fontWeight: isLeaf ? 400 : 600, 
+                <span style={{
+                  fontSize: isLeaf ? '12px' : '13px',
+                  fontWeight: isLeaf ? 400 : 600,
                   color: isLeaf ? '#e2e8f0' : '#cbd5e0',
                   userSelect: 'none'
                 }}>
@@ -344,9 +344,9 @@ export default function ModelTree({
         <Tooltip title="Hide checked"><Button size="small" icon={<EyeInvisibleOutlined />} disabled={checkedKeys.length === 0} onClick={() => { const m = getCheckedModelIdMap(); if (m) onHide?.(m); }} /></Tooltip>
         <Tooltip title="Isolate checked"><Button size="small" icon={<AimOutlined />} disabled={checkedKeys.length === 0} onClick={() => { const m = getCheckedModelIdMap(); if (m) onIsolate?.(m); }} /></Tooltip>
         <Tooltip title="Show all">
-          <Button 
-            size="small" 
-            icon={<EyeOutlined />} 
+          <Button
+            size="small"
+            icon={<EyeOutlined />}
             onClick={() => {
               const allKeys: string[] = [];
               function collectKeys(nodes: TreeNodeData[]) {
@@ -358,7 +358,7 @@ export default function ModelTree({
               collectKeys(treeData);
               setCheckedKeys(allKeys);
               onShowAll?.();
-            }} 
+            }}
           />
         </Tooltip>
         <Tooltip title="Clear highlight"><Button size="small" icon={<ReloadOutlined />} onClick={onClearHighlight} /></Tooltip>

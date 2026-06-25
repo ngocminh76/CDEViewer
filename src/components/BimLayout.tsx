@@ -80,6 +80,7 @@ export default function BimLayout() {
   const [toolMode, setToolModeState] = useState<ToolMode>('select');
   const [clipCount, setClipCount] = useState(0);
   const [mapboxEnabled, setMapboxEnabledState] = useState(false);
+  const [hideUnderground, setHideUnderground] = useState(false);
   const [mapboxCenter, setMapboxCenter] = useState<[number, number]>([105.804817, 21.028511]);
   const [mapboxElevation, setMapboxElevation] = useState<number>(0);
   const [mapboxHeading, setMapboxHeading] = useState<number>(0);
@@ -173,6 +174,7 @@ export default function BimLayout() {
       const engine = await createBimEngine(container3D, setStatus);
       engineRef.current = engine;
       engine.initMapbox(containerMapBox);
+      engine.setHideUnderground(hideUnderground);
       setModelCount(engine.fragments.list.size);
 
       const canvas = engine.world.renderer!.three.domElement;
@@ -481,6 +483,14 @@ export default function BimLayout() {
       }
     }
   }, [mapboxEnabled]);
+ 
+  const handleToggleHideUnderground = useCallback(() => {
+    const nextState = !hideUnderground;
+    setHideUnderground(nextState);
+    if (engineRef.current) {
+      engineRef.current.setHideUnderground(nextState);
+    }
+  }, [hideUnderground]);
 
   const handleUpdateParams = useCallback((params: {
     center?: [number, number];
@@ -491,6 +501,7 @@ export default function BimLayout() {
     rawX?: number | null;
     rawY?: number | null;
     rawZ?: number | null;
+    hideUnderground?: boolean;
   }) => {
     const engine = engineRef.current;
     if (!engine) return;
@@ -507,6 +518,10 @@ export default function BimLayout() {
     if (params.rawX !== undefined) {
       nextRawX = params.rawX;
       setRawX(nextRawX);
+    }
+    if (params.hideUnderground !== undefined) {
+      setHideUnderground(params.hideUnderground);
+      engineRef.current?.setHideUnderground(params.hideUnderground);
     }
     if (params.rawY !== undefined) {
       nextRawY = params.rawY;
@@ -609,22 +624,32 @@ export default function BimLayout() {
   }, []);
 
   // --- Upload ---
-  const handleUpload = useCallback(async (file: File) => {
+  const handleUploads = useCallback(async (files: File[]) => {
     const engine = engineRef.current;
     if (!engine) return;
-    try {
-      await loadIfcFile(engine, file, setStatus);
-      setModelCount(engine.fragments.list.size);
-      
-      // Update Tree Data after classifier finishes
-      engine.buildTreeData().then(setTreeData);
+    setStatus(`Loading ${files.length} models...`);
+    let successCount = 0;
+    for (const file of files) {
+      try {
+        await loadIfcFile(engine, file, setStatus);
+        successCount++;
+      } catch (err) {
+        console.error(`Upload failed for ${file.name}:`, err);
+      }
+    }
+    setModelCount(engine.fragments.list.size);
+    
+    // Update Tree Data after classifier finishes
+    engine.buildTreeData().then(setTreeData);
 
-      // Auto zoom to fit loaded model
-      setTimeout(async () => {
-        await engine.zoomToFit();
-      }, 100);
-    } catch (err) {
-      console.error('Upload failed:', err);
+    // Auto zoom to fit loaded model
+    setTimeout(async () => {
+      await engine.zoomToFit();
+    }, 100);
+
+    if (successCount > 0) {
+      setStatus(`Loaded ${successCount}/${files.length} models`);
+    } else {
       setStatus('Upload failed');
     }
   }, []);
@@ -656,7 +681,7 @@ export default function BimLayout() {
           rightCollapsed={rightCollapsed}
           onToggleRight={() => setRightCollapsed(!rightCollapsed)}
           status={status}
-          onUpload={handleUpload}
+          onUploads={handleUploads}
           username={username}
           onLogout={handleLogout}
         />
@@ -754,6 +779,8 @@ export default function BimLayout() {
                 onToggleMapbox={handleToggleMapbox}
                 docOpen={docOpen}
                 onToggleDoc={() => setDocOpen(!docOpen)}
+                hideUnderground={hideUnderground}
+                onToggleHideUnderground={handleToggleHideUnderground}
               />
             </div>
             
@@ -839,6 +866,7 @@ export default function BimLayout() {
                 mapboxBearing={mapboxBearing}
                 onUpdatePitch={handleUpdatePitch}
                 onUpdateBearing={handleUpdateBearing}
+                hideUnderground={hideUnderground}
               />
             )}
           </Sider>

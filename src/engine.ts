@@ -29,12 +29,12 @@ function cacheGeometryArrays(object: THREE.Object3D) {
             if (attr.isInterleavedBufferAttribute && attr.data && attr.data.array && attr.data.array.length > 0) {
               geometryArraysCache.set(attr.data, attr.data.array);
               if (typeof attr.data.onUpload === 'function') {
-                attr.data.onUpload(() => {});
+                attr.data.onUpload(() => { });
               }
             } else if (attr.array && attr.array.length > 0) {
               geometryArraysCache.set(attr, attr.array);
               if (typeof attr.onUpload === 'function') {
-                attr.onUpload(() => {});
+                attr.onUpload(() => { });
               }
             }
           }
@@ -42,14 +42,14 @@ function cacheGeometryArrays(object: THREE.Object3D) {
         if (geom.index && geom.index.array && geom.index.array.length > 0) {
           geometryArraysCache.set(geom.index, geom.index.array);
           if (typeof geom.index.onUpload === 'function') {
-            geom.index.onUpload(() => {});
+            geom.index.onUpload(() => { });
           }
         }
       }
       if (child.isInstancedMesh && child.instanceMatrix && child.instanceMatrix.array && child.instanceMatrix.array.length > 0) {
         geometryArraysCache.set(child.instanceMatrix, child.instanceMatrix.array);
         if (typeof child.instanceMatrix.onUpload === 'function') {
-          child.instanceMatrix.onUpload(() => {});
+          child.instanceMatrix.onUpload(() => { });
         }
       }
     }
@@ -147,6 +147,7 @@ export interface BimEngine {
   hider: OBC.Hider;
   clipper: OBC.Clipper;
   dispose: () => void;
+  loaded3DModels: THREE.Object3D[];
 
   // Mapbox
   mapBoxComponent: MapBoxComponent;
@@ -187,6 +188,10 @@ export interface BimEngine {
   // Tool mode
   setToolMode: (mode: ToolMode) => void;
   getToolMode: () => ToolMode;
+
+  // Underground clipping
+  hideUnderground: boolean;
+  setHideUnderground: (enabled: boolean) => void;
 }
 
 export async function createBimEngine(
@@ -207,7 +212,7 @@ export async function createBimEngine(
   world.renderer = new OBC.SimpleRenderer(components, viewportEl);
   world.renderer.showLogo = false;
   world.camera = new OBC.OrthoPerspectiveCamera(components);
-  
+
   // Adjust camera controls for large models (e.g. kilometers long)
   world.camera.controls.maxDistance = 10000000;
   world.camera.controls.dollyToCursor = true; // Makes zooming more intuitive
@@ -233,6 +238,7 @@ export async function createBimEngine(
 
   onStatus?.('Setting up fragments...');
   const fragments = await setupFragments(components, world);
+  const loaded3DModels: THREE.Object3D[] = [];
 
   // Tự động sao lưu bộ đệm hình học của mỗi model khi được load vào hệ thống
   fragments.list.onItemSet.add(({ value: model }) => {
@@ -293,7 +299,7 @@ export async function createBimEngine(
 
   function setMapboxEnabled(enabled: boolean) {
     console.log(`[CDEViewer DEBUG] Current fragments list size: ${fragments.list.size}`);
-    
+
     mapBoxComponent.enabled = enabled;
     if (enabled) {
       // TẮT LUỒNG KẾT XUẤT CỦA THREE.JS CỤC BỘ ĐỂ TIẾT KIỆM TÀI NGUYÊN GPU:
@@ -306,7 +312,7 @@ export async function createBimEngine(
         console.log(`[CDEViewer DEBUG] MapBoxComponent not setup. Calling setup()...`);
         mapBoxComponent.setup();
       }
-      
+
       // Stub các hàm cập nhật ma trận của camera cục bộ để tránh bị ghi đè dữ liệu đồng bộ từ Mapbox
       const cam = world.camera.three as any;
       if (!cam._origUpdateProjectionMatrix) {
@@ -315,8 +321,8 @@ export async function createBimEngine(
       if (!cam._origUpdateWorldMatrix) {
         cam._origUpdateWorldMatrix = cam.updateWorldMatrix;
       }
-      cam.updateProjectionMatrix = () => {};
-      cam.updateWorldMatrix = () => {};
+      cam.updateProjectionMatrix = () => { };
+      cam.updateWorldMatrix = () => { };
 
       // Di chuyển tất cả fragments/models từ local scene sang Mapbox scene
       for (const group of fragments.list.values()) {
@@ -325,7 +331,7 @@ export async function createBimEngine(
         restoreGeometryArrays(group.object);
 
         mapBoxComponent.scene.add(group.object);
-        
+
         // ĐỒNG BỘ CAMERA ĐỂ TRÁNH LỖI CULLING LÀM ẨN MÔ HÌNH:
         group.useCamera(world.camera.three);
 
@@ -354,7 +360,7 @@ export async function createBimEngine(
         mapBoxComponent.onResize();
         // Lần gọi thứ hai (sau 100ms): chỉ cập nhật kích thước vẽ, KHÔNG chạy lại hoạt cảnh bay camera (flyToCenter = false)
         updateMapboxGISParameters(mapBoxComponent.coord.center, mapBoxComponent.coord.elevation, mapBoxComponent.coord.heading, mapBoxComponent.coord.modelOrigin, false);
-        
+
         if (mapBoxComponent.renderer) {
           const canvas = mapBoxComponent.map?.getCanvas();
           console.log(`[CDEViewer DEBUG] Mapbox canvas client size: ${canvas?.clientWidth}x${canvas?.clientHeight}`);
@@ -389,10 +395,10 @@ export async function createBimEngine(
       for (const group of fragments.list.values()) {
         console.log(`[CDEViewer DEBUG] Moving modelId=${group.modelId} to local scene.`);
         world.scene.three.add(group.object);
-        
+
         // Trả lại camera của Three.js cục bộ cho mô hình
         group.useCamera(world.camera.three);
-        
+
         // Phục hồi lại frustum culling cho local scene
         let meshCount = 0;
         group.object.traverse((child: any) => {
@@ -431,6 +437,7 @@ export async function createBimEngine(
     if (modelOrigin !== undefined) {
       mapBoxComponent.coord.modelOrigin = modelOrigin;
     }
+    updateClippingPlanes();
     console.log(`[CDEViewer DEBUG] Final modelOrigin in coord: ${JSON.stringify(mapBoxComponent.coord.modelOrigin)}`);
     if (mapBoxComponent.map) {
       if (flyToCenter) {
@@ -470,17 +477,17 @@ export async function createBimEngine(
 
   function flattenSpatialTree(node: any): any {
     if (!node) return null;
-    
+
     if (Array.isArray(node.children)) {
       const newChildren: any[] = [];
       for (const child of node.children) {
         const childId = child.expressID ?? child.localId;
         const parentId = node.expressID ?? node.localId;
         const childCat = String(child.type || child.Type || child.category || '').toUpperCase();
-        
+
         const isDuplicate = (childId !== undefined && childId !== null && childId === parentId);
         const isRelation = childCat.startsWith('IFCREL') || childCat === 'IFCUNKNOWN';
-        
+
         if (isDuplicate || isRelation) {
           if (Array.isArray(child.children)) {
             for (const gchild of child.children) {
@@ -501,7 +508,7 @@ export async function createBimEngine(
 
   async function buildTreeData(): Promise<TreeNodeData[]> {
     const roots: TreeNodeData[] = [];
-    
+
     for (const [modelId, model] of fragments.list.entries()) {
       try {
         const spatialTree = await model.getSpatialStructure();
@@ -519,7 +526,7 @@ export async function createBimEngine(
         console.warn(`[Build tree] Failed for model ${modelId}:`, err);
       }
     }
-    
+
     if (roots.length === 0) {
       const categoryClass = classifier.list.get('Categories');
       if (categoryClass && categoryClass.size > 0) {
@@ -641,7 +648,6 @@ export async function createBimEngine(
         Math.pow(currentCenter.lng - targetCenter[0], 2) +
         Math.pow(currentCenter.lat - targetCenter[1], 2)
       );
-      // Nếu camera đã ở rất gần tâm (dưới ~11m), bỏ qua flyTo để tránh giật hình/xung đột hoạt ảnh camera
       if (dist < 0.0001) {
         console.log(`[zoomToFit] Mapbox camera is already near target center (${dist.toFixed(6)}). Skipping redundant flyTo.`);
         return;
@@ -657,13 +663,12 @@ export async function createBimEngine(
     }
 
     const modelIds = Array.from(fragments.list.keys()).map((id) => new RegExp(`^${id}$`));
-    if (modelIds.length === 0) return;
+    if (modelIds.length === 0 && loaded3DModels.length === 0) return;
 
     let retries = 0;
-    const maxRetries = 30; // 30 * 200ms = 6 giây chờ tối đa
-    
+    const maxRetries = 30; // 30 * 200ms = 6 seconds max wait
+
     while (retries < maxRetries) {
-      // 1. Kiểm tra xem có mô hình nào đang bận nạp dữ liệu hay không
       let anyBusy = false;
       for (const model of fragments.list.values()) {
         if ((model as any).isBusy) {
@@ -671,22 +676,35 @@ export async function createBimEngine(
           break;
         }
       }
-      
-      // 2. Tính toán thử hộp giới hạn Bounding Box
-      boxer.addFromModels(modelIds);
-      const box = boxer.get();
+
+      const box = new THREE.Box3();
+      let hasData = false;
+
+      if (modelIds.length > 0) {
+        boxer.addFromModels(modelIds);
+        const fragBox = boxer.get();
+        if (!isNaN(fragBox.min.x)) {
+          box.union(fragBox);
+          hasData = true;
+        }
+        boxer.dispose();
+      }
+
+      for (const obj of loaded3DModels) {
+        box.expandByObject(obj);
+        hasData = true;
+      }
+
       const center = new THREE.Vector3();
       const size = new THREE.Vector3();
       box.getCenter(center);
       box.getSize(size);
       const maxDim = Math.max(size.x, size.y, size.z);
       const dist = maxDim * 1.5;
-      
-      // Kiểm tra Bounding Box có hợp lệ (không chứa giá trị NaN hay Infinity)
-      const isValidBox = !isNaN(center.x) && !isNaN(center.y) && !isNaN(center.z) &&
-                         !isNaN(dist) && isFinite(dist) && dist > 0.01;
-      
-      // Nếu mô hình đã xong và Bounding Box hợp lệ -> Tiến hành Zoom
+
+      const isValidBox = hasData && !isNaN(center.x) && !isNaN(center.y) && !isNaN(center.z) &&
+        !isNaN(dist) && isFinite(dist) && dist > 0.01;
+
       if (!anyBusy && isValidBox) {
         console.log(`[zoomToFit] Bounding box is ready and valid after ${retries * 200}ms. Zooming...`);
         await world.camera.controls.setLookAt(
@@ -694,29 +712,42 @@ export async function createBimEngine(
           center.x, center.y, center.z,
           true,
         );
-        boxer.dispose();
         return;
       }
-      
-      // Giải phóng tài nguyên tạm thời và đợi 200ms trước khi thử lại
-      boxer.dispose();
+
       retries++;
       await new Promise(resolve => setTimeout(resolve, 200));
     }
-    
-    // Dự phòng sau khi timeout: Chỉ chuyển camera nếu Bounding Box hợp lệ (tránh NaN)
-    boxer.addFromModels(modelIds);
-    const box = boxer.get();
+
+    // Timeout fallback
+    const box = new THREE.Box3();
+    let hasData = false;
+
+    if (modelIds.length > 0) {
+      boxer.addFromModels(modelIds);
+      const fragBox = boxer.get();
+      if (!isNaN(fragBox.min.x)) {
+        box.union(fragBox);
+        hasData = true;
+      }
+      boxer.dispose();
+    }
+
+    for (const obj of loaded3DModels) {
+      box.expandByObject(obj);
+      hasData = true;
+    }
+
     const center = new THREE.Vector3();
     const size = new THREE.Vector3();
     box.getCenter(center);
     box.getSize(size);
     const maxDim = Math.max(size.x, size.y, size.z);
     const dist = maxDim * 1.5;
-    
-    const isValidBox = !isNaN(center.x) && !isNaN(center.y) && !isNaN(center.z) &&
-                       !isNaN(dist) && isFinite(dist) && dist > 0.01;
-                       
+
+    const isValidBox = hasData && !isNaN(center.x) && !isNaN(center.y) && !isNaN(center.z) &&
+      !isNaN(dist) && isFinite(dist) && dist > 0.01;
+
     if (isValidBox) {
       console.log(`[zoomToFit] Bounding box valid after timeout. Zooming...`);
       await world.camera.controls.setLookAt(
@@ -725,9 +756,8 @@ export async function createBimEngine(
         true,
       );
     } else {
-      console.warn("[zoomToFit] Bounding box is empty/invalid. Skipping zoom to prevent camera freeze.");
+      console.warn("[zoomToFit] Bounding box is empty/invalid. Skipping zoom.");
     }
-    boxer.dispose();
   }
 
   function setCameraView(view: 'top' | 'front' | 'right' | 'left' | 'back' | 'perspective') {
@@ -852,11 +882,46 @@ export async function createBimEngine(
     canvas.addEventListener('click', handleClick);
     return () => {
       canvas.removeEventListener('click', handleClick);
-      if (selectMap) fragments.resetHighlight(selectMap).catch(() => {});
+      if (selectMap) fragments.resetHighlight(selectMap).catch(() => { });
     };
   }
 
+  let hideUnderground = false;
+
+  function updateClippingPlanes() {
+    const originY = mapBoxComponent.coord.modelOrigin[1];
+    console.log(`[CDEViewer] updateClippingPlanes called. hideUnderground=${hideUnderground}, originY=${originY}`);
+    if (hideUnderground) {
+      const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -originY);
+      
+      // Update local renderer clipping planes
+      if (world.renderer?.three) {
+        world.renderer.three.clippingPlanes = [plane];
+      }
+      
+      // Update Mapbox component clipping planes
+      mapBoxComponent.clippingPlanes = [plane];
+    } else {
+      if (world.renderer?.three) {
+        world.renderer.three.clippingPlanes = [];
+      }
+      mapBoxComponent.clippingPlanes = [];
+    }
+    
+    // Trigger repaint
+    if (mapBoxComponent.enabled && mapBoxComponent.map) {
+      mapBoxComponent.map.triggerRepaint();
+    }
+  }
+
+  function setHideUnderground(enabled: boolean) {
+    hideUnderground = enabled;
+    updateClippingPlanes();
+  }
+
   return {
+    get hideUnderground() { return hideUnderground; },
+    setHideUnderground,
     components, world, fragments, ifcLoader, classifier, hider, clipper,
     dispose: () => components.dispose(),
     setupSelection, buildTreeData,
@@ -866,6 +931,7 @@ export async function createBimEngine(
     zoomToFit, setCameraView,
     setToolMode, getToolMode,
     mapBoxComponent, initMapbox, setMapboxEnabled, updateMapboxGISParameters, setMapboxStyle,
+    loaded3DModels,
   };
 }
 
@@ -899,7 +965,7 @@ function getPluralCategoryName(rawCategory: string): string {
     'IFCDISTRIBUTIONELEMENT': 'Distribution Elements',
   };
   if (mapping[entity]) return mapping[entity];
-  
+
   let formatted = formatIfcEntityName(rawCategory);
   if (formatted.endsWith('y')) {
     return formatted.slice(0, -1) + 'ies';
@@ -934,7 +1000,7 @@ async function buildSpatialNode(
   isParentSpatial: boolean = true,
 ): Promise<TreeNodeData | null> {
   if (!item) return null;
-  
+
   const localId = (item.expressID !== undefined && item.expressID !== null)
     ? item.expressID
     : ((item.localId !== undefined && item.localId !== null) ? item.localId : null);
@@ -942,7 +1008,7 @@ async function buildSpatialNode(
   const category = item.type || item.Type || item.category || '';
   const catUpper = category.toUpperCase();
   const isSpatialCategory = catUpper.includes('PROJECT') || catUpper.includes('SITE') || catUpper.includes('BUILDING') || catUpper.includes('STOREY');
-  
+
   let name = '';
   let description = '';
   if (localId !== null) {
@@ -973,18 +1039,18 @@ async function buildSpatialNode(
       }
     }
   }
-  
+
   let title = '';
   const formattedCategory = formatIfcEntityName(category);
-  
+
   if (name) {
     title = name;
   } else {
     title = formattedCategory || category;
   }
-  
+
   const children: TreeNodeData[] = [];
-  
+
   if (item.children) {
     for (const child of item.children) {
       const passSpatial = category ? isSpatialCategory : isParentSpatial;
@@ -992,12 +1058,12 @@ async function buildSpatialNode(
       if (childNode) children.push(childNode);
     }
   }
-  
+
   const modelIdMap: Record<string, Set<number>> = {};
   if (localId !== null) {
     modelIdMap[modelId] = new Set([localId]);
   }
-  
+
   for (const child of children) {
     if (child.modelIdMap) {
       for (const [mid, ids] of Object.entries(child.modelIdMap)) {
@@ -1006,14 +1072,14 @@ async function buildSpatialNode(
       }
     }
   }
-  
+
   let icon = 'element';
   if (catUpper.includes('PROJECT')) icon = 'building';
   else if (catUpper.includes('SITE')) icon = 'folder';
   else if (catUpper.includes('BUILDING') && !catUpper.includes('STOREY') && !catUpper.includes('ELEMENT')) icon = 'building';
   else if (catUpper.includes('STOREY')) icon = 'storey';
   else if (catUpper.includes('MODEL')) icon = 'model';
-  
+
   return {
     key: `spatial-${modelId}-${localId || Math.random()}-${category}`,
     title,
@@ -1076,7 +1142,7 @@ export async function getElementInfo(model: any, modelId: string, localId: numbe
         try {
           const boxer = components.get(OBC.BoundingBoxer);
           const selectMap = { [modelId]: new Set([localId]) };
-          
+
           // Thêm await vì addFromModelIdMap là một Async function trả về Promise!
           await boxer.addFromModelIdMap(selectMap);
           const box = boxer.get();
@@ -1098,7 +1164,7 @@ export async function getElementInfo(model: any, modelId: string, localId: numbe
             try {
               const spatialTree = await model.getSpatialStructure();
               const path: any[] = [];
-              
+
               function findPath(node: any, targetId: number): boolean {
                 if (!node) return false;
                 path.push(node);
@@ -1111,14 +1177,14 @@ export async function getElementInfo(model: any, modelId: string, localId: numbe
                 path.pop();
                 return false;
               }
-              
+
               if (findPath(spatialTree, localId)) {
                 const projectNode = path.find(n => n.type === 'IFCPROJECT');
                 const buildingNode = path.find(n => n.type === 'IFCBUILDING');
                 const parentIds: number[] = [];
                 if (projectNode) parentIds.push(projectNode.expressID);
                 if (buildingNode) parentIds.push(buildingNode.expressID);
-                
+
                 if (parentIds.length > 0) {
                   const parentsData = await model.getItemsData(parentIds);
                   if (parentsData) {
@@ -1161,7 +1227,7 @@ export async function getElementInfo(model: any, modelId: string, localId: numbe
               locGroup = { name: '📍 Location', properties: [] };
               propertySets.push(locGroup);
             }
-            
+
             // BIMVision hiển thị: Project, Building, Storey, Elevations...
             // Chúng ta chèn Project và Building lên đầu danh sách Location
             const finalLocProps: { name: string; value: string; unit?: string }[] = [];
@@ -1169,26 +1235,26 @@ export async function getElementInfo(model: any, modelId: string, localId: numbe
             if (buildingName) {
               finalLocProps.push({ name: 'Building', value: buildingName });
             }
-            
+
             // Giữ lại các thuộc tính cũ của Location (ví dụ Storey, Elevation tầng)
             if (locGroup.properties.length > 0) {
               // Lọc bỏ trùng lặp nếu trong properties cũ đã có Project/Building
               const oldProps = locGroup.properties.filter(op => op.name !== 'Project' && op.name !== 'Building');
               finalLocProps.push(...oldProps);
             }
-            
+
             // Thêm các thuộc tính Elevations tính toán của BIMVision
             finalLocProps.push(...locationProps);
-            
+
             locGroup.properties = finalLocProps;
 
             // 2. Thêm nhóm Geometry
             propertySets.push({ name: '📐 Geometry', properties: geometryProps });
 
             // 3. Trích xuất Layer từ dữ liệu liên kết nếu có và thêm vào nhóm Membership
-            const layerVal = unwrap(itemData.PresentationLayer) || 
-                             unwrap(itemData.Layer) || 
-                             (Array.isArray(itemData.PresentationLayers) && itemData.PresentationLayers[0] ? unwrap(itemData.PresentationLayers[0].Name) : null);
+            const layerVal = unwrap(itemData.PresentationLayer) ||
+              unwrap(itemData.Layer) ||
+              (Array.isArray(itemData.PresentationLayers) && itemData.PresentationLayers[0] ? unwrap(itemData.PresentationLayers[0].Name) : null);
             if (layerVal) {
               propertySets.push({
                 name: '👥 Membership',
@@ -1324,13 +1390,13 @@ interface ProjectUnits {
 
 function parseUnitEntity(unitEntity: any, model?: any): string | undefined {
   if (!unitEntity) return undefined;
-  
+
   const typeName = String(unwrap(unitEntity._category) || unwrap(unitEntity.type) || '').toUpperCase();
-  
+
   if (typeName.includes('SIUNIT')) {
     const name = String(unwrap(unitEntity.Name) || '').toUpperCase().replace(/\./g, '');
     const prefix = String(unwrap(unitEntity.Prefix) || '').toUpperCase().replace(/\./g, '');
-    
+
     if (name === 'METRE') {
       if (prefix === 'MILLI') return 'mm';
       if (prefix === 'CENTI') return 'cm';
@@ -1344,22 +1410,22 @@ function parseUnitEntity(unitEntity: any, model?: any): string | undefined {
     if (name === 'RADIAN') return 'rad';
     if (name === 'NEWTON') return 'N';
     if (name === 'PASCAL') return 'Pa';
-    
+
     return (prefix && prefix !== 'NONE' ? prefix.toLowerCase() : '') + name.toLowerCase();
   }
-  
+
   if (typeName.includes('CONVERSIONBASEDUNIT')) {
     const name = unwrap(unitEntity.Name);
     if (name) return String(name);
   }
-  
+
   return undefined;
 }
 
 function getProjectUnits(model: any): ProjectUnits {
   const units: ProjectUnits = { length: 'mm', area: 'm2', volume: 'm3' };
   if (!model || !model.properties) return units;
-  
+
   let unitAssignment: any = null;
   for (const entity of Object.values(model.properties) as any[]) {
     const category = String(entity._category || entity.type || '').toUpperCase();
@@ -1368,15 +1434,15 @@ function getProjectUnits(model: any): ProjectUnits {
       break;
     }
   }
-  
+
   if (unitAssignment && Array.isArray(unitAssignment.Units)) {
     for (const unitRef of unitAssignment.Units) {
       const unitId = unwrap(unitRef);
       if (!unitId) continue;
-      
+
       const unitEntity = model.properties[unitId];
       if (!unitEntity) continue;
-      
+
       const unitType = String(unwrap(unitEntity.UnitType) || '').toUpperCase().replace(/\./g, '');
       const parsed = parseUnitEntity(unitEntity, model);
       if (parsed) {
@@ -1407,7 +1473,7 @@ function getUnitOfProperty(prop: any, name: string, projectUnits?: ProjectUnits,
       if (parsed) return parsed;
     }
   }
-  
+
   const nomVal = prop.NominalValue;
   if (nomVal && typeof nomVal === 'object') {
     const typeLabel = String(nomVal.label || nomVal.type || '').toUpperCase();
@@ -1421,33 +1487,33 @@ function getUnitOfProperty(prop: any, name: string, projectUnits?: ProjectUnits,
       return projectUnits?.volume ?? 'm3';
     }
   }
-  
+
   const cleanName = name.toLowerCase().trim();
-  
-  if (cleanName.includes('volume') || cleanName.includes('thể tích') || cleanName.includes('the tich') || 
-      cleanName.includes('khối lượng') || cleanName.includes('khoi luong') || cleanName.includes('khoiluong')) {
+
+  if (cleanName.includes('volume') || cleanName.includes('thể tích') || cleanName.includes('the tich') ||
+    cleanName.includes('khối lượng') || cleanName.includes('khoi luong') || cleanName.includes('khoiluong')) {
     return projectUnits?.volume ?? 'm3';
   }
-  
+
   if (cleanName.includes('area') || cleanName.includes('diện tích') || cleanName.includes('dien tich') || cleanName.includes('dientich')) {
     return projectUnits?.area ?? 'm2';
   }
-  
-  if (cleanName.includes('width') || cleanName.includes('height') || cleanName.includes('length') || 
-      cleanName.includes('thickness') || cleanName.includes('depth') || cleanName.includes('radius') || 
-      cleanName.includes('elevation') || cleanName.includes('offset') || cleanName.includes('size') ||
-      cleanName.includes('cao độ') || cleanName.includes('cao do') || cleanName.includes('kích thước') || cleanName.includes('kich thuoc') ||
-      /^tru_/i.test(cleanName) || 
-      /^be_/i.test(cleanName) || 
-      /^a\d+/i.test(cleanName) || 
-      /_h$/i.test(cleanName) || /_w$/i.test(cleanName) || /_l$/i.test(cleanName) || /_d$/i.test(cleanName) || /_r$/i.test(cleanName)
+
+  if (cleanName.includes('width') || cleanName.includes('height') || cleanName.includes('length') ||
+    cleanName.includes('thickness') || cleanName.includes('depth') || cleanName.includes('radius') ||
+    cleanName.includes('elevation') || cleanName.includes('offset') || cleanName.includes('size') ||
+    cleanName.includes('cao độ') || cleanName.includes('cao do') || cleanName.includes('kích thước') || cleanName.includes('kich thuoc') ||
+    /^tru_/i.test(cleanName) ||
+    /^be_/i.test(cleanName) ||
+    /^a\d+/i.test(cleanName) ||
+    /_h$/i.test(cleanName) || /_w$/i.test(cleanName) || /_l$/i.test(cleanName) || /_d$/i.test(cleanName) || /_r$/i.test(cleanName)
   ) {
     const val = Number(unwrap(prop.NominalValue) ?? unwrap(prop.Value) ?? 0);
     if (Math.abs(val) > 1 || val === 0 || isNaN(val)) {
       return projectUnits?.length ?? 'mm';
     }
   }
-  
+
   return undefined;
 }
 
@@ -1567,8 +1633,8 @@ function parseItemDataToSections(
           if (!q || typeof q !== 'object') continue;
           const qName = unwrap(q.Name) || 'Unknown';
           const qVal = unwrap(q.LengthValue) ?? unwrap(q.AreaValue) ??
-                       unwrap(q.VolumeValue) ?? unwrap(q.WeightValue) ??
-                       unwrap(q.CountValue) ?? unwrap(q.Value) ?? '';
+            unwrap(q.VolumeValue) ?? unwrap(q.WeightValue) ??
+            unwrap(q.CountValue) ?? unwrap(q.Value) ?? '';
           const qCat = unwrap(q._category) || '';
           let unit = '';
           if (qCat.includes('LENGTH')) unit = 'mm';
@@ -1580,7 +1646,7 @@ function parseItemDataToSections(
       }
 
       if (rel.Profile || relName.includes('Profile') || relCat === 'IFCISHAPEPROFILEDEF' ||
-          relCat === 'IFCRECTANGLEPROFILEDEF' || relCat === 'IFCCIRCLEPROFILEDEF') {
+        relCat === 'IFCRECTANGLEPROFILEDEF' || relCat === 'IFCCIRCLEPROFILEDEF') {
         const profile = rel.Profile || rel;
         addUnwrapped(psetProps, profile, [
           'ProfileName', 'ProfileType',
@@ -1658,27 +1724,103 @@ export async function loadIfcFile(
   file: File,
   onStatus?: (msg: string) => void,
 ): Promise<string> {
-  onStatus?.(`Loading: ${file.name}...`);
-  const buf = await file.arrayBuffer();
-  const isFrag = file.name.toLowerCase().endsWith('.frag');
-  const modelId = file.name.replace(/\.(ifc|frag)$/i, '');
+  const nameLower = file.name.toLowerCase();
+  const isFrag = nameLower.endsWith('.frag');
+  const isIfc = nameLower.endsWith('.ifc');
 
-  if (isFrag) {
-    await engine.fragments.core.load(new Uint8Array(buf), { modelId });
-  } else {
-    await engine.ifcLoader.load(new Uint8Array(buf), true, modelId, {
-      processData: {
-        progressCallback: (p: number) => {
-          onStatus?.(`Loading: ${file.name} (${Math.round(p * 100)}%)`);
+  if (isFrag || isIfc) {
+    onStatus?.(`Loading: ${file.name}...`);
+    const buf = await file.arrayBuffer();
+    const modelId = file.name.replace(/\.(ifc|frag)$/i, '');
+
+    if (isFrag) {
+      await engine.fragments.core.load(new Uint8Array(buf), { modelId });
+    } else {
+      await engine.ifcLoader.load(new Uint8Array(buf), true, modelId, {
+        processData: {
+          progressCallback: (p: number) => {
+            onStatus?.(`Loading: ${file.name} (${Math.round(p * 100)}%)`);
+          },
         },
-      },
-    });
+      });
+    }
+
+    onStatus?.('Classifying...');
+    await engine.classifier.byIfcBuildingStorey();
+    await engine.classifier.byCategory();
+    await engine.classifier.byModel();
+    onStatus?.(`Loaded: ${modelId}`);
+    return modelId;
   }
 
-  onStatus?.('Classifying...');
-  await engine.classifier.byIfcBuildingStorey();
-  await engine.classifier.byCategory();
-  await engine.classifier.byModel();
-  onStatus?.(`Loaded: ${modelId}`);
-  return modelId;
+  // Handle generic 3D formats (glTF/glb, OBJ, FBX)
+  const isGltf = nameLower.endsWith('.gltf') || nameLower.endsWith('.glb');
+  const isObj = nameLower.endsWith('.obj');
+  const isFbx = nameLower.endsWith('.fbx');
+
+  if (isGltf || isObj || isFbx) {
+    onStatus?.(`Loading 3D model: ${file.name}...`);
+    const url = URL.createObjectURL(file);
+
+    try {
+      let loadedAsset: any;
+      if (isGltf) {
+        const { GLTFLoader } = await import('three/examples/jsm/loaders/GLTFLoader.js');
+        const loader = new GLTFLoader();
+        loadedAsset = await new Promise((resolve, reject) => {
+          loader.load(url, resolve, undefined, reject);
+        });
+      } else if (isObj) {
+        const { OBJLoader } = await import('three/examples/jsm/loaders/OBJLoader.js');
+        const loader = new OBJLoader();
+        loadedAsset = await new Promise((resolve, reject) => {
+          loader.load(url, resolve, undefined, reject);
+        });
+      } else {
+        const { FBXLoader } = await import('three/examples/jsm/loaders/FBXLoader.js');
+        const loader = new FBXLoader();
+        loadedAsset = await new Promise((resolve, reject) => {
+          loader.load(url, resolve, undefined, reject);
+        });
+      }
+
+      URL.revokeObjectURL(url);
+      const object = isGltf ? loadedAsset.scene : loadedAsset;
+
+      // Ensure proper shadow settings & disable frustum culling
+      object.traverse((child: any) => {
+        if (child.isMesh) {
+          child.castShadow = true;
+          child.receiveShadow = true;
+          child.frustumCulled = false;
+        }
+      });
+
+      // Add to scene (Mapbox scene or Three.js scene)
+      const mapBoxComponent = engine.mapBoxComponent;
+      if (mapBoxComponent && mapBoxComponent.enabled) {
+        mapBoxComponent.scene.add(object);
+        console.log(`[CDEViewer] 3D model ${file.name} added to MAPBOX scene.`);
+        setTimeout(() => {
+          if (mapBoxComponent.map) {
+            mapBoxComponent.map.triggerRepaint();
+          }
+        }, 100);
+      } else {
+        engine.world.scene.three.add(object);
+        console.log(`[CDEViewer] 3D model ${file.name} added to LOCAL scene.`);
+      }
+
+      // Save references on engine
+      engine.loaded3DModels.push(object);
+
+      onStatus?.(`Loaded: ${file.name}`);
+      return file.name;
+    } catch (err) {
+      URL.revokeObjectURL(url);
+      throw err;
+    }
+  }
+
+  throw new Error(`Unsupported file format: ${file.name}`);
 }
