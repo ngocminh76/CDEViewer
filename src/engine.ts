@@ -886,20 +886,37 @@ export async function createBimEngine(
     };
   }
 
+  // Trạng thái ẩn phần dưới mặt đất (underground clipping)
   let hideUnderground = false;
 
+  /**
+   * CẬP NHẬT MẶT PHẲNG CẮT (CLIPPING PLANES) DỰA TRÊN TRẠNG THÁI HIỂN THỊ
+   * 
+   * Nguyên lý hoạt động:
+   * 1. Lấy cao độ Y của gốc tọa độ mô hình `modelOrigin[1]` trong không gian Three.js cục bộ.
+   *    Trong hệ tọa độ của mô hình này, trục Y là trục thẳng đứng (up axis) hướng lên trời.
+   * 2. Nếu chế độ `hideUnderground = true`:
+   *    - Tạo một mặt phẳng cắt `THREE.Plane` có vector pháp tuyến hướng lên trời (0, 1, 0).
+   *    - Đặt hằng số constant của mặt phẳng là `-originY` để cắt chính xác tại điểm tiếp đất của mô hình.
+   *      Phương trình mặt phẳng: normal.dot(p) + constant >= 0 => Y - originY >= 0 => Y >= originY.
+   *      Nhờ đó, mọi phần tử có tọa độ Y bé hơn điểm tiếp đất sẽ bị cắt bỏ (ẩn đi).
+   *    - Gán mặt phẳng này vào cả bộ renderer cục bộ và Mapbox Custom Layer renderer.
+   * 3. Nếu chế độ `hideUnderground = false`:
+   *    - Xóa toàn bộ danh sách mặt phẳng cắt để hiển thị lại mô hình đầy đủ.
+   * 4. Kích hoạt vẽ lại bản đồ vệ tinh Mapbox lập tức (triggerRepaint) nếu đang bật chế độ map.
+   */
   function updateClippingPlanes() {
     const originY = mapBoxComponent.coord.modelOrigin[1];
     console.log(`[CDEViewer] updateClippingPlanes called. hideUnderground=${hideUnderground}, originY=${originY}`);
     if (hideUnderground) {
       const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -originY);
       
-      // Update local renderer clipping planes
+      // Cập nhật mặt phẳng cắt cho renderer cục bộ (khi tắt map)
       if (world.renderer?.three) {
         world.renderer.three.clippingPlanes = [plane];
       }
       
-      // Update Mapbox component clipping planes
+      // Cập nhật mặt phẳng cắt cho Custom Layer của Mapbox (khi bật map)
       mapBoxComponent.clippingPlanes = [plane];
     } else {
       if (world.renderer?.three) {
@@ -908,12 +925,16 @@ export async function createBimEngine(
       mapBoxComponent.clippingPlanes = [];
     }
     
-    // Trigger repaint
+    // Yêu cầu Mapbox vẽ lại giao diện ngay lập tức để áp dụng mặt phẳng cắt mới
     if (mapBoxComponent.enabled && mapBoxComponent.map) {
       mapBoxComponent.map.triggerRepaint();
     }
   }
 
+  /**
+   * Thiết lập trạng thái ẩn/hiện phần cấu kiện dưới lòng đất
+   * @param enabled true để ẩn, false để hiện toàn bộ
+   */
   function setHideUnderground(enabled: boolean) {
     hideUnderground = enabled;
     updateClippingPlanes();

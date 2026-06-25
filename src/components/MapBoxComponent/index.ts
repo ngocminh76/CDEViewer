@@ -53,7 +53,7 @@ export class MapBoxComponent
   camera: THREE.PerspectiveCamera = new THREE.PerspectiveCamera();
   renderer!: THREE.WebGLRenderer;
   labelRenderer: CSS2DRenderer = new CSS2DRenderer();
-  readonly scene: THREE.Scene = new THREE.Scene();
+  // Danh sách các mặt phẳng cắt (clipping planes) được áp dụng cho WebGLRenderer của Mapbox
   clippingPlanes: THREE.Plane[] = [];
 
 
@@ -253,6 +253,7 @@ export class MapBoxComponent
       console.log(`[MapBox DEBUG] camera projection matrix elements:`, Array.from(this.camera.projectionMatrix.elements).map(n => Number(n.toFixed(6))));
     }
 
+    // Gán các mặt phẳng cắt hiện tại vào WebGLRenderer của Mapbox trước khi vẽ
     this.renderer.clippingPlanes = this.clippingPlanes;
     this.renderer.resetState();
     
