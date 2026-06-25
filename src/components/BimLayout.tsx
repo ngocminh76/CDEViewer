@@ -311,6 +311,31 @@ export default function BimLayout() {
         setKtt(activeKtt);
         setZone3deg(activeZone3deg);
         
+        // PHƯƠNG THỨC DÙNG CHUNG: Quy đổi tọa độ VN-2000 sang WGS-84 và đồng bộ tham số lên Mapbox GIS
+        const applyVn2000Georeference = (
+          east: number,
+          north: number,
+          height: number,
+          localOriginCoord: [number, number, number]
+        ) => {
+          const absoluteEast = Math.abs(east);
+          const absoluteNorth = Math.abs(north);
+          
+          setRawX(absoluteEast);
+          setRawY(absoluteNorth);
+          setRawZ(height);
+          
+          // Chuyển đổi tọa độ VN-2000 sang WGS84 (Kinh độ/Vĩ độ) với 7 tham số
+          const [lng, lat] = vn2000ToWgs84(absoluteEast, absoluteNorth, activeKtt, activeZone3deg, height);
+          setMapboxCenter([lng, lat]);
+          setMapboxElevation(height);
+          
+          // Xác định modelOrigin cho Mapbox: Nếu mô hình đã căn tâm (centered) thì gốc là (0,0,0)
+          const mOrigin = isCentered ? [0, 0, 0] : localOriginCoord;
+          engine.updateMapboxGISParameters([lng, lat], height, mapboxHeadingRef.current, mOrigin as [number, number, number], true);
+          foundGeoreference = true;
+        };
+
         // BƯỚC 1: Lấy tọa độ trắc địa CRS từ thuộc tính getCRS() của mô hình IFC.
         // Đây là phương án chính xác nhất thường được xuất từ các phần mềm BIM như Revit (Shared Coordinates).
         try {
@@ -323,22 +348,7 @@ export default function BimLayout() {
             
             if (Math.abs(east) > 10000 && Math.abs(north) > 10000) {
               console.log('[CDEViewer] Georeference base point detected from getCRS():', east, north, height);
-              const absoluteEast = Math.abs(east);
-              const absoluteNorth = Math.abs(north);
-              
-              setRawX(absoluteEast);
-              setRawY(absoluteNorth);
-              setRawZ(height);
-              
-              // Chuyển đổi tọa độ VN-2000 của Việt Nam sang tọa độ địa lý WGS84 (Kinh độ/Vĩ độ) với 7 tham số
-              const [lng, lat] = vn2000ToWgs84(absoluteEast, absoluteNorth, activeKtt, activeZone3deg, height);
-              setMapboxCenter([lng, lat]);
-              setMapboxElevation(height);
-              
-              // Nếu mô hình được căn tâm, gốc Three.js sẽ là (0,0,0). Nếu không, nó là [east, height, -north].
-              const mOrigin = isCentered ? [0, 0, 0] : [east, height, -north];
-              engine.updateMapboxGISParameters([lng, lat], height, mapboxHeadingRef.current, mOrigin as [number,number,number], true);
-              foundGeoreference = true;
+              applyVn2000Georeference(east, north, height, [east, height, -north]);
             }
           }
         } catch (crsErr) {
@@ -355,20 +365,7 @@ export default function BimLayout() {
             
             if (Math.abs(pos.x) > 10000 && Math.abs(pos.z) > 10000) {
               console.log('[CDEViewer] Georeference base point detected from coordination matrix:', pos);
-              const absoluteX = Math.abs(pos.x);
-              const absoluteY = Math.abs(pos.z);
-              
-              setRawX(absoluteX);
-              setRawY(absoluteY);
-              setRawZ(pos.y);
-              
-              // Chuyển đổi VN-2000 sang WGS84 với 7 tham số
-              const [lng, lat] = vn2000ToWgs84(absoluteX, absoluteY, activeKtt, activeZone3deg, pos.y);
-              setMapboxCenter([lng, lat]);
-              setMapboxElevation(pos.y);
-              const mOrigin = isCentered ? [0, 0, 0] : [pos.x, pos.y, pos.z];
-              engine.updateMapboxGISParameters([lng, lat], pos.y, mapboxHeadingRef.current, mOrigin as [number,number,number], true);
-              foundGeoreference = true;
+              applyVn2000Georeference(pos.x, pos.z, pos.y, [pos.x, pos.y, pos.z]);
             }
           } catch (matrixErr) {
             console.warn('[CDEViewer] Failed to query model.getCoordinationMatrix():', matrixErr);
@@ -378,18 +375,7 @@ export default function BimLayout() {
         // BƯỚC 3: Dự phòng tính từ tâm Bounding Box nếu mô hình không được căn tâm và các bước trước thất bại
         if (!foundGeoreference && !isCentered) {
           console.log('[CDEViewer] Georeference base point detected from BoundingBox:', bboxCenter);
-          const absoluteEast = Math.abs(bboxCenter.x);
-          const absoluteNorth = Math.abs(bboxCenter.z);
-          
-          setRawX(absoluteEast);
-          setRawY(absoluteNorth);
-          setRawZ(bboxCenter.y);
-          // Chuyển đổi VN-2000 sang WGS84 với 7 tham số
-          const [lng, lat] = vn2000ToWgs84(absoluteEast, absoluteNorth, activeKtt, activeZone3deg, bboxCenter.y);
-          setMapboxCenter([lng, lat]);
-          setMapboxElevation(bboxCenter.y);
-          engine.updateMapboxGISParameters([lng, lat], bboxCenter.y, mapboxHeadingRef.current, [bboxCenter.x, bboxCenter.y, bboxCenter.z], true);
-          foundGeoreference = true;
+          applyVn2000Georeference(bboxCenter.x, bboxCenter.z, bboxCenter.y, [bboxCenter.x, bboxCenter.y, bboxCenter.z]);
         }
         
         // BƯỚC 4: Dự phòng lấy tọa độ địa lý kinh độ/vĩ độ trực tiếp từ thực thể IfcSite (RefLatitude, RefLongitude).

@@ -53,6 +53,7 @@ export class MapBoxComponent
   camera: THREE.PerspectiveCamera = new THREE.PerspectiveCamera();
   renderer!: THREE.WebGLRenderer;
   labelRenderer: CSS2DRenderer = new CSS2DRenderer();
+  readonly scene: THREE.Scene = new THREE.Scene();
   // Danh sách các mặt phẳng cắt (clipping planes) được áp dụng cho WebGLRenderer của Mapbox
   clippingPlanes: THREE.Plane[] = [];
 

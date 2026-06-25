@@ -3,8 +3,8 @@ export const WASM_CONFIG = {
   absolute: true,
 } as const;
 
-export const WORKER_URL =
-  'https://thatopen.github.io/engine_fragment/resources/worker.mjs';
+// Sử dụng đường dẫn tương đối trỏ tới thư mục /public/ của dự án để hỗ trợ chạy Offline hoàn toàn
+export const WORKER_URL = '/worker.mjs';
 
 export const IFC_SAMPLE = {
   name: 'small',
